@@ -108,3 +108,38 @@ def test_same_subject_in_different_words():
     assert sources.same_subject("Japan’s GMO Internet warns users of impending ransomware attack",
                                 "GMO refuses demands as hackers threaten data leak, ransomware attack at noon Tuesday")
     assert not sources.same_subject("Apple unveils new M5 MacBook Pro", "Apple fined in EU over App Store rules")
+
+
+def test_settings_api_saves_masks_and_guards(monkeypatch, tmp_path):
+    from dotenv import dotenv_values
+
+    from technews import config, create_app
+
+    env = tmp_path / ".env"
+    env.write_text("IG_PASSWORD=old\n")
+    monkeypatch.setattr(config, "ENV_PATH", env)
+    monkeypatch.setattr(settings, "SCHEDULER_ENABLED", False)
+    for name in ("NVIDIA_API_KEY", "IG_USERNAME", "IG_PASSWORD", "POSTS_PER_DAY"):
+        monkeypatch.setattr(settings, name, getattr(settings, name))  # restored after the test
+    client = create_app().test_client()
+
+    r = client.post("/api/settings", json={"NVIDIA_API_KEY": "nvapi-secret-1234", "IG_USERNAME": "@cloudtrio",
+                                           "IG_PASSWORD": "", "POSTS_PER_DAY": "3"})  # fmt: skip
+    assert r.status_code == 200 and set(r.json["changed"]) == {"NVIDIA_API_KEY", "IG_USERNAME", "POSTS_PER_DAY"}
+    assert settings.NVIDIA_API_KEY == "nvapi-secret-1234" and settings.POSTS_PER_DAY == 3
+    saved = dotenv_values(env)
+    assert saved["IG_USERNAME"] == "cloudtrio" and saved["IG_PASSWORD"] == "old"  # blank secret kept
+
+    shown = client.get("/api/settings").json["settings"]
+    assert "secret" not in shown["NVIDIA_API_KEY"] and shown["NVIDIA_API_KEY"].endswith("1234")
+    assert client.post("/api/settings", json={"IG_DELIVERY": "tiktok"}).status_code == 400
+    # Without an admin token, only this machine may change settings.
+    remote = client.post("/api/settings", json={"POSTS_PER_DAY": "9"}, environ_base={"REMOTE_ADDR": "192.168.1.20"})
+    assert remote.status_code == 403 and settings.POSTS_PER_DAY == 3
+
+
+def test_password_mask_shows_nothing_of_the_password(monkeypatch):
+    from technews import config
+
+    monkeypatch.setattr(settings, "IG_PASSWORD", "hunter2-secret-1998")
+    assert config.public()["IG_PASSWORD"] == "•" * 8

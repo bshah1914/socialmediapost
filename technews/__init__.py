@@ -12,9 +12,11 @@ from typing import Any
 import click
 from flask import Flask, abort, jsonify, render_template, request, send_from_directory
 
-from technews import db, instagram, pipeline, scheduler
+from technews import config, db, instagram, pipeline, scheduler
 from technews.agents import llm
 from technews.config import settings
+
+LOCAL: frozenset[str] = frozenset({"127.0.0.1", "::1"})
 
 
 def create_app() -> Flask:
@@ -28,10 +30,16 @@ def create_app() -> Flask:
         scheduler.start()
 
     def admin(view: Any) -> Any:
+        """Changes need the admin token; without one set, only this machine may make them
+        (the settings hold the NVIDIA key and the Instagram password)."""
+
         @wraps(view)
         def wrapped(*args: Any, **kwargs: Any) -> Any:
-            if settings.ADMIN_TOKEN and request.headers.get("X-Admin-Token") != settings.ADMIN_TOKEN:
-                abort(401)
+            if settings.ADMIN_TOKEN:
+                if request.headers.get("X-Admin-Token") != settings.ADMIN_TOKEN:
+                    abort(401)
+            elif request.remote_addr not in LOCAL:
+                abort(403, "Set ADMIN_TOKEN in .env to make changes from another machine.")
             return view(*args, **kwargs)
 
         return wrapped
@@ -49,6 +57,7 @@ def create_app() -> Flask:
             "pacing": why,
             "last_cycle": json.loads(last) if last else None,
             "last_error": db.kv_get(pipeline.LAST_ERROR_KEY),
+            "instagram_user": instagram.session_user(),
         }
 
     @app.get("/")
@@ -86,6 +95,77 @@ def create_app() -> Flask:
         if (left := instagram.paused()) > 0:
             return jsonify({"posted": False, "reason": f"Instagram pause, {left / 60:.0f} min left"}), 409
         return jsonify(pipeline.publish_story(story_id))
+
+    # ----------------------------------------------------------------- settings
+
+    @app.get("/api/settings")
+    @admin
+    def api_settings() -> Any:
+        job = instagram.current_login()
+        return jsonify({"settings": config.public(), "instagram_user": instagram.session_user(),
+                        "login": job.as_dict() if job else None})  # fmt: skip
+
+    @app.post("/api/settings")
+    @admin
+    def api_settings_save() -> Any:
+        try:
+            changed = config.update(request.get_json(silent=True) or {})
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"changed": changed, "settings": config.public()})
+
+    @app.post("/api/settings/test-nvidia")
+    @admin
+    def api_test_nvidia() -> Any:
+        try:
+            reply = llm.chat_json(system='Reply with {"ok": true}.', user="ping", max_tokens=20)
+        except llm.LLMError as exc:
+            return jsonify({"ok": False, "message": str(exc)[:300]})
+        return jsonify({"ok": True, "message": f"{reply.model} answered in {reply.latency_ms} ms"})
+
+    @app.post("/api/instagram/login")
+    @admin
+    def api_ig_login() -> Any:
+        """Connect with the saved username / password (save them first)."""
+        if not (settings.IG_USERNAME and settings.IG_PASSWORD):
+            return jsonify({"state": "error", "message": "Save the Instagram username and password first."}), 400
+        try:
+            job = instagram.start_login(settings.IG_USERNAME, settings.IG_PASSWORD)
+        except instagram.InstagramPublishError as exc:
+            return jsonify({"state": "error", "message": str(exc)}), 409
+        return jsonify(job.as_dict())
+
+    @app.get("/api/instagram/login")
+    @admin
+    def api_ig_login_status() -> Any:
+        job = instagram.current_login()
+        return jsonify(job.as_dict() if job else {"state": "idle", "message": ""})
+
+    @app.post("/api/instagram/code")
+    @admin
+    def api_ig_code() -> Any:
+        job = instagram.current_login()
+        code = str((request.get_json(silent=True) or {}).get("code", "")).strip()
+        if job is None or job.state != "need_code":
+            return jsonify({"state": "error", "message": "No login is waiting for a code."}), 409
+        if not (code.isdigit() and len(code) in (6, 8)):
+            return jsonify({"state": "need_code", "message": "The code is 6 digits."}), 400
+        job.submit_code(code)
+        return jsonify({"state": "running", "message": "Checking the code…"})
+
+    @app.post("/api/instagram/session")
+    @admin
+    def api_ig_session() -> Any:
+        """Connect with the sessionid cookie from instagram.com in the browser."""
+        sessionid = str((request.get_json(silent=True) or {}).get("sessionid", ""))
+        try:
+            instagram.login_with_sessionid(sessionid)
+        except Exception as exc:  # noqa: BLE001 - shown on the dashboard
+            return jsonify({"state": "error", "message": f"That session did not work: {exc}"}), 400
+        user = instagram.session_user()
+        if user and user != settings.IG_USERNAME.lower():
+            config.update({"IG_USERNAME": user})
+        return jsonify({"state": "ok", "message": f"Connected as @{user}."})
 
     @app.get("/cards/<path:name>")
     def cards(name: str) -> Any:

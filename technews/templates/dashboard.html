@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="60">
 <title>Tech Newsroom</title>
 <style>
   :root { --bg:#0b0f1a; --panel:#141b2d; --line:#24304d; --text:#e8ecf7; --muted:#8a96b5; --ok:#30d158; --warn:#ffd60a; --bad:#ff453a; --accent:#5e5ce6; }
@@ -31,6 +30,19 @@
   .post img { width:100%; display:block; }
   .post div { padding:8px 10px; font-size:12px; }
   .filters { margin-bottom:8px; display:flex; gap:6px; flex-wrap:wrap; }
+  .settings { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:12px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .panel h3 { margin:0 0 4px; font-size:15px; }
+  label { display:block; margin:12px 0 4px; color:var(--muted); font-size:12px; font-weight:600; }
+  input, select { width:100%; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; }
+  input:focus, select:focus { outline:2px solid var(--accent); border-color:transparent; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  .row input { flex:1; min-width:120px; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+  .msg { margin-top:10px; font-size:13px; min-height:1em; overflow-wrap:anywhere; }
+  .ok { color:var(--ok); } .err { color:var(--bad); }
+  details summary { cursor:pointer; color:var(--muted); margin-top:14px; font-size:13px; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
 </style>
 </head>
 <body>
@@ -50,6 +62,53 @@
     <button onclick="run('/api/cycle?post=0', this)">Scan + review now</button>
     <button onclick="run('/api/cycle', this)">Full cycle now</button>
   </p>
+
+  <h2>Settings</h2>
+  <div class="settings">
+    <div class="panel">
+      <h3>Agents · NVIDIA</h3>
+      <div class="muted">Scanner, reviewer and writer run on this key.</div>
+      <label for="NVIDIA_API_KEY">API key <span id="key-state" class="muted"></span></label>
+      <input id="NVIDIA_API_KEY" type="password" autocomplete="off" placeholder="nvapi-… (leave blank to keep the saved key)">
+      <label for="NVIDIA_MODEL">Model</label>
+      <input id="NVIDIA_MODEL" type="text" autocomplete="off">
+      <div class="row">
+        <button onclick="save(['NVIDIA_API_KEY','NVIDIA_MODEL'], 'nv-msg')">Save</button>
+        <button class="ghost" onclick="testNvidia()">Test key</button>
+      </div>
+      <div id="nv-msg" class="msg"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Instagram</h3>
+      <div>Connected: <b id="ig-user">–</b></div>
+      <label for="IG_USERNAME">Username</label>
+      <input id="IG_USERNAME" type="text" autocomplete="off">
+      <label for="IG_PASSWORD">Password <span id="pw-state" class="muted"></span></label>
+      <input id="IG_PASSWORD" type="password" autocomplete="new-password" placeholder="leave blank to keep the saved password">
+      <div class="two">
+        <div><label for="IG_HANDLE">Handle on cards</label><input id="IG_HANDLE" type="text" autocomplete="off"></div>
+        <div><label for="IG_DELIVERY">Posting</label>
+          <select id="IG_DELIVERY"><option value="instagram">Live on Instagram</option><option value="dry_run">Dry run (outbox only)</option></select></div>
+        <div><label for="POSTS_PER_DAY">Posts per day</label><input id="POSTS_PER_DAY" type="number" min="1" max="50"></div>
+        <div><label for="MIN_POST_GAP_MINUTES">Minutes between posts</label><input id="MIN_POST_GAP_MINUTES" type="number" min="1" max="1440"></div>
+      </div>
+      <div class="row">
+        <button onclick="save(['IG_USERNAME','IG_PASSWORD','IG_HANDLE','IG_DELIVERY','POSTS_PER_DAY','MIN_POST_GAP_MINUTES'], 'ig-msg')">Save</button>
+        <button class="ghost" onclick="connect()">Save &amp; connect</button>
+      </div>
+      <div id="code-row" class="row" hidden>
+        <input id="ig-code" inputmode="numeric" maxlength="8" placeholder="6-digit code">
+        <button onclick="sendCode()">Verify</button>
+      </div>
+      <div id="ig-msg" class="msg"></div>
+      <details>
+        <summary>Instagram keeps saying “please wait”? Connect with the browser session</summary>
+        <div class="muted" style="margin-top:8px">Log in on instagram.com in Chrome → ⌥⌘I → Application → Cookies → instagram.com → copy <b>sessionid</b>.</div>
+        <div class="row"><input id="sessionid" type="password" autocomplete="off" placeholder="sessionid"><button onclick="useSession()">Connect</button></div>
+      </details>
+    </div>
+  </div>
 
   <h2>Posts</h2>
   {% if posts %}
@@ -91,6 +150,80 @@
   </table></div>
 </main>
 <script>
+
+  const tokenHeaders = () => { const t = localStorage.getItem("adminToken") || ""; return t ? { "X-Admin-Token": t } : {}; };
+  async function api(url, body) {
+    const r = await fetch(url, body === undefined ? { headers: tokenHeaders() } :
+      { method: "POST", headers: { "Content-Type": "application/json", ...tokenHeaders() }, body: JSON.stringify(body) });
+    if (r.status === 401) { const t = window.prompt("Admin token"); if (t) { localStorage.setItem("adminToken", t); return api(url, body); } }
+    return [r.ok, await r.json().catch(() => ({ message: r.statusText }))];
+  }
+  function say(id, text, ok) { const el = document.getElementById(id); el.textContent = text; el.className = "msg " + (ok ? "ok" : "err"); }
+  let busy = false;
+
+  async function loadSettings() {
+    const [ok, d] = await api("/api/settings");
+    if (!ok) return;
+    const s = d.settings;
+    for (const k of ["NVIDIA_MODEL", "IG_USERNAME", "IG_HANDLE", "IG_DELIVERY", "POSTS_PER_DAY", "MIN_POST_GAP_MINUTES"]) document.getElementById(k).value = s[k];
+    document.getElementById("key-state").textContent = s.NVIDIA_API_KEY_set ? "(saved " + s.NVIDIA_API_KEY + ")" : "(not set)";
+    document.getElementById("pw-state").textContent = s.IG_PASSWORD_set ? "(saved)" : "(not set)";
+    document.getElementById("ig-user").textContent = d.instagram_user ? "@" + d.instagram_user : "not connected";
+    if (d.login && ["running", "need_code"].includes(d.login.state)) showLogin(d.login);
+  }
+
+  async function save(keys, msgId) {
+    const body = {};
+    for (const k of keys) body[k] = document.getElementById(k).value;
+    const [ok, d] = await api("/api/settings", body);
+    if (!ok) { say(msgId, d.error || d.message, false); return false; }
+    for (const k of ["NVIDIA_API_KEY", "IG_PASSWORD"]) document.getElementById(k).value = "";
+    say(msgId, d.changed.length ? "Saved: " + d.changed.join(", ") : "Nothing changed.", true);
+    await loadSettings();
+    return true;
+  }
+
+  async function testNvidia() {
+    say("nv-msg", "Asking the model…", true);
+    const [, d] = await api("/api/settings/test-nvidia", {});
+    say("nv-msg", d.message, d.ok);
+  }
+
+  function showLogin(job) {
+    busy = ["running", "need_code"].includes(job.state);
+    document.getElementById("code-row").hidden = job.state !== "need_code";
+    if (job.state === "need_code") document.getElementById("ig-code").focus();
+    say("ig-msg", job.message, job.state !== "error");
+    if (job.state === "ok") loadSettings();
+    if (busy) setTimeout(pollLogin, 2000);
+  }
+  async function pollLogin() { const [, d] = await api("/api/instagram/login"); showLogin(d); }
+
+  async function connect() {
+    if (!await save(["IG_USERNAME", "IG_PASSWORD", "IG_HANDLE", "IG_DELIVERY", "POSTS_PER_DAY", "MIN_POST_GAP_MINUTES"], "ig-msg")) return;
+    const [, d] = await api("/api/instagram/login", {});
+    showLogin(d);
+  }
+  async function sendCode() {
+    const [, d] = await api("/api/instagram/code", { code: document.getElementById("ig-code").value });
+    document.getElementById("ig-code").value = "";
+    showLogin(d);
+  }
+  async function useSession() {
+    say("ig-msg", "Checking the session…", true);
+    const [ok, d] = await api("/api/instagram/session", { sessionid: document.getElementById("sessionid").value });
+    document.getElementById("sessionid").value = "";
+    say("ig-msg", d.message, ok);
+    if (ok) loadSettings();
+  }
+
+  loadSettings();
+  // Refresh the page every minute, but never while you type or a login is running.
+  setInterval(() => {
+    const typing = ["INPUT", "SELECT"].includes(document.activeElement?.tagName);
+    if (!typing && !busy) location.reload();
+  }, 60000);
+
   async function run(url, btn) {
     const token = localStorage.getItem("adminToken") || "";
     btn.disabled = true; const label = btn.textContent; btn.textContent = "Working…";
