@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="60">
+<title>Tech Newsroom</title>
+<style>
+  :root { --bg:#0b0f1a; --panel:#141b2d; --line:#24304d; --text:#e8ecf7; --muted:#8a96b5; --ok:#30d158; --warn:#ffd60a; --bad:#ff453a; --accent:#5e5ce6; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 -apple-system, system-ui, sans-serif; }
+  main { max-width:1200px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:16px; margin:28px 0 10px; }
+  .muted { color:var(--muted); }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-top:16px; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .tile b { display:block; font-size:18px; margin-top:2px; overflow-wrap:anywhere; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 14px; font-weight:600; cursor:pointer; }
+  button.small { padding:4px 10px; font-size:12px; }
+  .table { overflow-x:auto; background:var(--panel); border:1px solid var(--line); border-radius:10px; }
+  table { width:100%; border-collapse:collapse; min-width:760px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; }
+  a { color:#8ab4ff; text-decoration:none; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
+  .approved, .posted { color:var(--ok); border-color:var(--ok); }
+  .new { color:var(--warn); border-color:var(--warn); }
+  .failed { color:var(--bad); border-color:var(--bad); }
+  .posts { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px; }
+  .post { background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .post img { width:100%; display:block; }
+  .post div { padding:8px 10px; font-size:12px; }
+  .filters { margin-bottom:8px; display:flex; gap:6px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tech Newsroom</h1>
+  <div class="muted">Scanner → Reviewer → Writer → Instagram · auto-refreshes every minute</div>
+
+  <div class="tiles">
+    <div class="tile"><span class="muted">Delivery</span><b>{{ status.delivery }}</b></div>
+    <div class="tile"><span class="muted">Agents' model</span><b style="font-size:13px">{{ status.llm }}</b></div>
+    <div class="tile"><span class="muted">Posts today</span><b>{{ status.posts_today }} / {{ status.posts_per_day }}</b></div>
+    <div class="tile"><span class="muted">Can post</span><b>{{ "yes" if status.can_post else "no" }}</b><span class="muted">{{ status.pacing }}</span></div>
+    <div class="tile"><span class="muted">Next cycle</span><b style="font-size:13px">{{ status.scheduler[0].next_run[11:19] if status.scheduler else "scheduler off" }}</b></div>
+  </div>
+  {% if status.last_error %}<p class="failed">Last error: {{ status.last_error }}</p>{% endif %}
+  <p>
+    <button onclick="run('/api/cycle?post=0', this)">Scan + review now</button>
+    <button onclick="run('/api/cycle', this)">Full cycle now</button>
+  </p>
+
+  <h2>Posts</h2>
+  {% if posts %}
+  <div class="posts">
+    {% for p in posts %}
+    <div class="post">
+      <img src="/cards/{{ p.image_path.split('/')[-1] }}" alt="">
+      <div><span class="pill {{ p.status }}">{{ p.status }}</span> {{ p.delivered }} · {{ p.writer }}<br>
+        <span class="muted">{{ p.created_at[:16].replace('T', ' ') }} UTC</span>
+        {% if p.permalink %}<br><a href="{{ p.permalink }}" target="_blank">Open on Instagram</a>{% endif %}
+        {% if p.error %}<br><span class="failed">{{ p.error[:120] }}</span>{% endif %}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<p class="muted">Nothing posted yet.</p>{% endif %}
+
+  <h2>Stories</h2>
+  <div class="filters">
+    {% for s in ["all", "approved", "new", "rejected", "posted", "low", "not_tech"] %}
+    <button class="small" onclick="filterRows('{{ s }}')">{{ s }}</button>
+    {% endfor %}
+  </div>
+  <div class="table"><table>
+    <thead><tr><th>Status</th><th>Story</th><th>Cat.</th><th>Scan</th><th>Review</th><th>Outlets</th><th></th></tr></thead>
+    <tbody>
+    {% for s in stories %}
+    <tr data-status="{{ s.status }}">
+      <td><span class="pill {{ s.status }}">{{ s.status }}</span></td>
+      <td><a href="{{ s.url }}" target="_blank">{{ s.title }}</a><br>
+        <span class="muted">{{ s.review_reason or s.scan_reason }}</span></td>
+      <td>{{ s.category }}</td>
+      <td>{{ "%.1f"|format(s.scan_score) }}</td>
+      <td>{{ "%.1f"|format(s.review_score) if s.review_score is not none else "–" }}</td>
+      <td title="{{ s.outlets|join(', ') }}">{{ s.outlets|length }}</td>
+      <td>{% if s.status not in ("posted", "not_tech") %}<button class="small" onclick="run('/api/stories/{{ s.id }}/post', this)">Post</button>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</main>
+<script>
+  async function run(url, btn) {
+    const token = localStorage.getItem("adminToken") || "";
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "Working…";
+    try {
+      const r = await fetch(url, { method: "POST", headers: token ? { "X-Admin-Token": token } : {} });
+      if (r.status === 401) {
+        const t = window.prompt("Admin token");
+        if (t) { localStorage.setItem("adminToken", t); return run(url, btn); }
+      }
+      console.log(await r.json());
+    } finally { location.reload(); }
+  }
+  function filterRows(status) {
+    document.querySelectorAll("tbody tr").forEach(tr => {
+      tr.style.display = status === "all" || tr.dataset.status === status ? "" : "none";
+    });
+  }
+</script>
+</body>
+</html>

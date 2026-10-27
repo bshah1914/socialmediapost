@@ -1,0 +1,5 @@
+#!/bin/sh
+# Instagram login with this project's Python (the system `flask` is not this app's).
+#   ./ig-login            username + password from .env (asks for the 6-digit code)
+#   ./ig-login --browser  paste the sessionid cookie from instagram.com instead
+cd "$(dirname "$0")" && TECHNEWS_CLI=1 exec .venv/bin/flask --app run ig-login "$@"
