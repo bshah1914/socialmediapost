@@ -1,0 +1,33 @@
+# CloudTrio Newsroom. Start with:  docker compose up -d --build
+# The data (database, Instagram session, cards, saved settings) lives in the "newsroom-data" volume.
+services:
+  newsroom:
+    build: .
+    image: cloudtrio/newsroom:latest
+    container_name: cloudtrio-newsroom
+    restart: unless-stopped
+    ports:
+      - "${BIND:-127.0.0.1}:5000:5000"   # BIND=0.0.0.0 to reach it on the LAN without the proxy
+    volumes:
+      - newsroom-data:/data
+    environment:
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      ADMIN_USER: ${ADMIN_USER:-}          # only used to create the account on the very first start
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+
+  # Optional: HTTPS for post.cloudtrio.in with a free certificate (needs ports 80 and 443 free).
+  # Start with:  docker compose --profile proxy up -d
+  caddy:
+    profiles: ["proxy"]
+    image: caddy:2
+    container_name: cloudtrio-caddy
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [newsroom]
+
+volumes:
+  newsroom-data:
+  caddy-data:

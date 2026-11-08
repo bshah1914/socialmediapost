@@ -16,6 +16,8 @@ blocks, so:
 from __future__ import annotations
 
 import getpass
+import json
+import re
 import logging
 import queue
 import shutil
@@ -25,8 +27,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
+from urllib.parse import unquote
 
-from technews import db
+from technews import config, db, secretbox
 from technews.config import settings
 
 logger = logging.getLogger(__name__)
@@ -62,7 +65,7 @@ def dry_run() -> bool:
 
 def paused() -> float:
     """Seconds left of a pause after Instagram flagged a post (0: not paused)."""
-    return 0.0 if dry_run() else db.kv_ttl(RESTRICT_PAUSE_KEY)
+    return 0.0 if dry_run() else db.kv_ttl(RESTRICT_PAUSE_KEY + _brand_suffix())
 
 
 def _is_restriction(exc: Exception) -> bool:
@@ -77,6 +80,7 @@ def new_client() -> Any:
         raise InstagramPublishError("instagrapi is not installed: pip install -r requirements.txt") from exc
     client = Client()
     client.delay_range = [1, 3]
+    client.password_encrypt = plain_password  # type: ignore[method-assign]
     try:
         client.set_device({**client.device_settings, **DEVICE})
         client.set_user_agent()
@@ -85,12 +89,24 @@ def new_client() -> Any:
     return client
 
 
+def plain_password(password: str) -> str:
+    """The password in Instagram's "version 0" form. instagrapi encrypts it with a key read from /qe/sync/, which
+    Instagram stopped serving (2026-10-27): its older login route then failed with ``int(None)``. The login accepts
+    this form without the key, as the newer route already does."""
+    return password if password.startswith("#PWD_") else f"#PWD_INSTAGRAM:0:{int(time.time())}:{password}"
+
+
 SESSION_USER_KEY: Final = "instagram:session_user"
+LOGOUT_ALERT_KEY: Final = "instagram:logout_alert"
+
+
+def _brand_suffix() -> str:
+    return "" if settings.BRAND_ID == 1 else f":{settings.BRAND_ID}"
 
 
 def session_user() -> str:
     """The account the saved session belongs to ("" when there is none)."""
-    return (db.kv_get(SESSION_USER_KEY) or "") if settings.IG_SESSION_PATH.exists() else ""
+    return (db.kv_get(SESSION_USER_KEY + _brand_suffix()) or "") if settings.IG_SESSION_PATH.exists() else ""
 
 
 def get_client() -> Any:
@@ -105,21 +121,65 @@ def get_client() -> Any:
         )
     client = new_client()
     try:
-        client.load_settings(str(session))
+        client.set_settings(read_session(session))
         client.get_timeline_feed()  # probe the session without logging in
     except Exception as exc:  # noqa: BLE001
+        _tell_logged_out(type(exc).__name__)
         raise InstagramPublishError(
             f"Saved Instagram session is not valid ({type(exc).__name__}): connect Instagram again."
         ) from exc
     return client
 
 
+def _tell_logged_out(why: str) -> None:
+    if settings.IG_DELIVERY != "instagram" or not db.kv_claim(LOGOUT_ALERT_KEY + _brand_suffix(), 6 * 3600):
+        return
+    try:
+        from technews import notify
+
+        notify.send("CloudTrio: Instagram logged the newsroom out",
+                    f"Instagram ended the saved session ({why}), so nothing can be posted. Reconnect under Settings, Instagram "
+                    f"(password, or the browser session). {settings.PUBLIC_URL.rstrip('/')}/#settings")  # fmt: skip
+    except Exception:  # noqa: BLE001 - the alert is best effort
+        logger.exception("instagram.logout_alert_failed")
+
+
+def read_session(path: Path) -> dict[str, Any]:
+    """The saved session as a dict, whether the file is plain JSON or sealed with the secrets key."""
+    text = path.read_text(encoding="utf-8").strip()
+    if secretbox.sealed(text):
+        text = secretbox.reveal(text)
+        if not text:
+            raise InstagramPublishError("The saved Instagram session is sealed and cannot be opened with this SECRETS_KEY: connect Instagram again.")
+    return json.loads(text)
+
+
+def write_session(path: Path, data: dict[str, Any]) -> None:
+    """Write the session sealed (plain only when no secrets key is set), readable by this account alone."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(secretbox.seal(json.dumps(data, indent=4)), encoding="utf-8")
+    path.chmod(0o600)
+
+
+def seal_saved_sessions() -> int:
+    """Seal any session file still held as plain text (every brand's). Returns how many were changed."""
+    if not secretbox.available():
+        return 0
+    changed = 0
+    for path in settings.DATA_DIR.glob("ig_session*.json"):
+        try:
+            if not secretbox.sealed(path.read_text(encoding="utf-8").strip()):
+                write_session(path, json.loads(path.read_text(encoding="utf-8")))
+                changed += 1
+        except (OSError, ValueError):
+            logger.exception("instagram.seal_failed file=%s", path.name)
+    return changed
+
+
 def _save_session(client: Any, username: str) -> str:
     session = settings.IG_SESSION_PATH
-    session.parent.mkdir(parents=True, exist_ok=True)
-    client.dump_settings(str(session))
-    session.chmod(0o600)
-    db.kv_set(SESSION_USER_KEY, username.lower())
+    write_session(session, client.get_settings())
+    db.kv_set(SESSION_USER_KEY + _brand_suffix(), username.lower())
     return str(session)
 
 
@@ -178,12 +238,19 @@ def login_with_sessionid(sessionid: str) -> str:
     """Adopt a browser session instead of logging in with the password: Instagram throttles
     password logins from scripts ("Please wait a few minutes"), never a session you already
     have. The ``sessionid`` cookie comes from instagram.com in the browser."""
-    sessionid = sessionid.strip().strip('"')
-    if not sessionid[:1].isdigit() or len(sessionid) < 30:
+    sessionid = unquote(sessionid.strip().strip('"').strip())
+    if not re.match(r"^\d+:", sessionid) or len(sessionid) < 30:
         raise InstagramPublishError("That is not a sessionid cookie (it starts with your numeric user id).")
     client = new_client()
-    client.login_by_sessionid(sessionid)
-    client.get_timeline_feed()
+    try:
+        client.login_by_sessionid(sessionid)
+        client.get_timeline_feed()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("instagram.sessionid_failed error=%s", str(exc)[:200], exc_info=True)
+        raise InstagramPublishError(
+            "Instagram did not accept that session. Copy sessionid again from a browser that is still logged in to "
+            "Instagram (and do not log out there afterwards)."
+        ) from exc
     username = str(getattr(client, "username", "") or client.account_info().username)
     return _save_session(client, username)
 
@@ -202,6 +269,7 @@ class LoginJob:
         self.state = "running"  # running | need_code | ok | error
         self.message = "Logging in…"
         self._codes: queue.Queue[str] = queue.Queue()
+        self._ov = config.current_override()  # the job runs for the brand that started it
         threading.Thread(target=self._run, args=(password,), daemon=True).start()
 
     def _ask_code(self, why: str) -> str:
@@ -215,10 +283,11 @@ class LoginJob:
 
     def _run(self, password: str) -> None:
         try:
-            login(self.username, password, self._ask_code)
+            with config.override(self._ov):
+                login(self.username, password, self._ask_code)
             self.state, self.message = "ok", f"Connected as @{self.username}."
         except Exception as exc:  # noqa: BLE001 - shown on the dashboard
-            logger.warning("instagram.login_failed error=%s", str(exc)[:200])
+            logger.warning("instagram.login_failed error=%s", str(exc)[:200], exc_info=True)
             hint = " Instagram is throttling logins from this machine: wait, or use the browser sessionid." if "please wait" in str(exc).lower() else ""
             self.state, self.message = "error", f"Login failed: {exc}.{hint}"
 
@@ -247,16 +316,16 @@ def current_login() -> LoginJob | None:
 def _restricted(exc: Exception, client: Any, caption: str) -> dict[str, str]:
     """Instagram answered "we restrict certain activity". If the post went up anyway (the
     usual case) it is recorded and posting rests briefly; if not, it rests for hours."""
-    db.kv_set(RESTRICTED_AT_KEY, datetime.now(UTC).isoformat())
+    db.kv_set(RESTRICTED_AT_KEY + _brand_suffix(), datetime.now(UTC).isoformat())
     try:
         for media in client.user_medias(client.user_id, amount=3):
             if (getattr(media, "caption_text", "") or "").strip() == caption.strip():
-                db.kv_set(RESTRICT_PAUSE_KEY, "1", ttl=settings.IG_WARNED_PAUSE_MINUTES * 60)
+                db.kv_set(RESTRICT_PAUSE_KEY + _brand_suffix(), "1", ttl=settings.IG_WARNED_PAUSE_MINUTES * 60)
                 logger.warning("instagram.warned_but_live error=%s", str(exc)[:200])
                 return {**_media(media), "restricted": "1"}
     except Exception:  # noqa: BLE001 - the lookup is best effort
         logger.exception("instagram.restricted_lookup_failed")
-    db.kv_set(RESTRICT_PAUSE_KEY, "1", ttl=settings.IG_RESTRICT_PAUSE_HOURS * 3600)
+    db.kv_set(RESTRICT_PAUSE_KEY + _brand_suffix(), "1", ttl=settings.IG_RESTRICT_PAUSE_HOURS * 3600)
     raise InstagramRestrictedError(
         f"Instagram refused the post as automated; posting paused {settings.IG_RESTRICT_PAUSE_HOURS:g} h ({exc})"
     ) from exc
@@ -290,3 +359,55 @@ def publish_photo(path: Path, caption: str, *, client: Any = None) -> dict[str, 
             raise InstagramPublishError("Instagram is challenging this login: run `flask --app run ig-login`.") from exc
         raise InstagramPublishError(f"photo_upload failed: {exc}") from exc
     return _media(media)
+
+
+def publish_reel(video: Path, cover: Path, caption: str, *, client: Any = None) -> dict[str, str]:
+    """An animated post: the video as a Reel, with ``cover`` as its picture in the grid."""
+    if dry_run():
+        settings.OUTBOX_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        out = settings.OUTBOX_DIR / f"{stamp}-{Path(video).name}"
+        shutil.copyfile(video, out)
+        out.with_suffix(".txt").write_text(caption, encoding="utf-8")
+        logger.info("instagram.dry_run_reel file=%s", out.name)
+        return {"media_id": f"dry:{stamp}", "permalink": "", "delivered": "dry_run"}
+    client = client or get_client()
+    try:
+        media = client.clip_upload(Path(video), caption, thumbnail=Path(cover))
+    except Exception as exc:  # noqa: BLE001
+        if _is_restriction(exc):
+            return _restricted(exc, client, caption)
+        if "challenge" in str(exc).lower():
+            raise InstagramPublishError("Instagram is challenging this login: run `flask --app run ig-login`.") from exc
+        raise InstagramPublishError(f"clip_upload failed: {exc}") from exc
+    code = getattr(media, "code", "") or ""
+    return {**_media(media), "permalink": f"https://www.instagram.com/reel/{code}/" if code else ""}
+
+
+def _live_media(media_id: str) -> bool:
+    """A post that is really on Instagram (not a dry-run copy on staging)."""
+    return bool(media_id) and not media_id.startswith("dry:") and not dry_run()
+
+
+def edit_caption(media_id: str, caption: str, *, client: Any = None) -> None:
+    """Change the caption of a post that is already on Instagram (the picture cannot be changed)."""
+    if not _live_media(media_id):
+        return
+    client = client or get_client()
+    try:
+        client.media_edit(media_id, caption)
+    except Exception as exc:  # noqa: BLE001
+        raise InstagramPublishError(f"Instagram did not take the new caption: {exc}") from exc
+
+
+def delete_media(media_id: str, *, client: Any = None) -> None:
+    """Take a post down from Instagram."""
+    if not _live_media(media_id):
+        return
+    client = client or get_client()
+    try:
+        done = client.media_delete(media_id)
+    except Exception as exc:  # noqa: BLE001
+        raise InstagramPublishError(f"Instagram did not delete the post: {exc}") from exc
+    if done is False:
+        raise InstagramPublishError("Instagram did not delete the post")

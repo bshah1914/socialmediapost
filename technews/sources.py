@@ -15,9 +15,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Final
+from urllib.parse import urlparse
 
 import feedparser
 import requests
+
+from technews import db
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +38,32 @@ FEEDS: Final[dict[str, str]] = {
     "Ars Technica": "https://feeds.arstechnica.com/arstechnica/index",
     "Wired": "https://www.wired.com/feed/rss",
     "Hacker News": "https://hnrss.org/frontpage?points=300",
+    "The Register": "https://www.theregister.com/headlines.atom",
+    "InfoQ Cloud": "https://feed.infoq.com/cloud-computing/",
+    "AWS News Blog": "https://aws.amazon.com/blogs/aws/feed/",
+    "Google Cloud Blog": "https://cloudblog.withgoogle.com/rss/",
+    "Azure Blog": "https://azure.microsoft.com/en-us/blog/feed/",
+    "The New Stack": "https://thenewstack.io/feed/",
+    "GitHub Blog": "https://github.blog/feed/",
+    "Docker Blog": "https://www.docker.com/blog/feed/",
+    "CNCF": "https://www.cncf.io/feed/",
+    "Kubernetes Blog": "https://kubernetes.io/feed.xml",
+    "HashiCorp Blog": "https://www.hashicorp.com/blog/feed.xml",
 }
 
 GOOGLE_NEWS: Final = "https://news.google.com/rss/search"
+BLOCKED: Final = (401, 403, 429)  # the answers that mean "not you", not "broken"
 SEARCHES: Final[tuple[str, ...]] = (
+    "AWS announces OR launches",
+    "Microsoft Azure announces OR outage",
+    "Google Cloud GCP announces",
+    "DevOps OR DevSecOps",
+    "Kubernetes OR Terraform OR Docker vulnerability OR release",
+    "GitHub Actions OR GitLab OR Jenkins",
+    "AWS OR Azure OR \"Google Cloud\" announces",
+    "cloud outage",
+    "cloud security breach misconfiguration",
+    "Kubernetes OR serverless OR \"cloud computing\"",
     "data breach",
     "ransomware attack",
     "zero-day exploited",
@@ -50,11 +75,22 @@ SEARCHES: Final[tuple[str, ...]] = (
     "viral tech",
 )
 
-#: Outlets whose word is enough on its own; anything else wants a second outlet.
-TRUSTED: Final = frozenset(
+#: Outlets whose word is enough on its own; anything else wants a second outlet. The names of
+#: the feeds you follow count too (see ``trusted_outlets``).
+TRUSTED_EXTRA: Final = frozenset(
     name.lower()
-    for name in (*FEEDS, "Reuters", "Bloomberg", "The Record", "CNBC", "BBC", "The Guardian",
-                 "Associated Press", "Engadget", "ZDNET", "The Register", "CyberScoop", "Axios")
+    for name in ("Reuters", "Bloomberg", "The Record", "CNBC", "BBC", "The Guardian",
+                 "Associated Press", "Engadget", "ZDNET", "The Register", "CyberScoop", "Axios",
+                 "The New Stack", "SiliconANGLE", "CRN", "DataCenterDynamics", "ET Datacenters", "InfoWorld",
+                 "Network World", "Computerworld", "CIO", "TechRadar", "VentureBeat", "Data Center Knowledge",
+                 "Google Cloud Press Corner", "Cloudflare", "Microsoft Azure", "Amazon Web Services",
+                 "DevOps.com", "Container Journal", "InfoQ", "GitLab", "GitHub", "Kubernetes", "Docker",
+                 "Cloud Native Now", "CSO Online", "www.csoonline.com", "Docker Blog", "AWS News Blog", "AWS Blog",
+                 "Microsoft Azure Blog", "Google Cloud Blog", "Cloud Native Computing Foundation", "CNCF",
+                 "HashiCorp", "The Hacker News", "BleepingComputer", "Dark Reading", "SecurityWeek", "TechCrunch",
+                 "The Verge", "Ars Technica", "Wired", "CyberSecurityNews", "Hackread", "The Cloudflare Blog",
+                 "Platform Engineering", "DevOps Digest", "TechTarget", "Cloud Computing News", "Forbes", "Fortune",
+                 "SiliconANGLE & theCUBE", "Techzine Global", "The Next Platform", "The Stack")
 )  # fmt: skip
 
 
@@ -110,6 +146,86 @@ def parse_feed(source: str, text: str, *, google: bool = False) -> list[FeedItem
     return items
 
 
+# --------------------------------------------------------------------------- the editable list
+
+
+_trusted_cache: frozenset[str] | None = None
+
+
+def seed() -> None:
+    """The first time, the built-in feeds and searches go into the database; after that it is yours."""
+    if db.kv_get("sources:seeded"):
+        return
+    for name, url in FEEDS.items():
+        db.execute("INSERT OR IGNORE INTO sources (kind, name, value) VALUES ('feed', ?, ?)", name, url)
+    for query in SEARCHES:
+        db.execute("INSERT OR IGNORE INTO sources (kind, name, value) VALUES ('search', '', ?)", query)
+    db.kv_set("sources:seeded", "1")
+
+
+def listing() -> list[dict]:
+    seed()
+    return [{**r, "enabled": bool(r["enabled"])} for r in db.rows("SELECT * FROM sources ORDER BY kind, name, id")]
+
+
+def add(kind: str, name: str, value: str) -> dict:
+    global _trusted_cache
+    seed()
+    name, value = name.strip(), value.strip()
+    if kind == "feed":
+        if not re.match(r"https?://\S+$", value):
+            raise ValueError("The feed address must start with http:// or https://")
+        if not name:
+            raise ValueError("Give the feed a name (it shows on the card)")
+    elif kind == "search":
+        name = ""
+        if not 2 <= len(value) <= 120:
+            raise ValueError("The search needs 2 to 120 characters")
+    else:
+        raise ValueError("kind must be feed or search")
+    try:
+        new_id = db.execute("INSERT INTO sources (kind, name, value) VALUES (?,?,?)", kind, name[:60], value)
+    except Exception as exc:  # noqa: BLE001 - the UNIQUE (kind, value) rule
+        raise ValueError("That one is already in the list") from exc
+    _trusted_cache = None
+    return next(r for r in listing() if r["id"] == new_id)
+
+
+def set_enabled(source_id: int, enabled: bool) -> bool:
+    global _trusted_cache
+    seed()
+    found = db.rows("SELECT id FROM sources WHERE id = ?", source_id)
+    if found:
+        db.execute("UPDATE sources SET enabled = ? WHERE id = ?", int(enabled), source_id)
+        _trusted_cache = None
+    return bool(found)
+
+
+def remove(source_id: int) -> bool:
+    global _trusted_cache
+    seed()
+    found = db.rows("SELECT id FROM sources WHERE id = ?", source_id)
+    if found:
+        db.execute("DELETE FROM sources WHERE id = ?", source_id)
+        _trusted_cache = None
+    return bool(found)
+
+
+def probe(url: str) -> dict:
+    """Fetch one feed to show it works: how many items and the first titles."""
+    items = _fetch_feed("probe", url)
+    return {"count": len(items), "titles": [i.title for i in items[:3]]}
+
+
+def trusted_outlets() -> frozenset[str]:
+    global _trusted_cache
+    if _trusted_cache is None:
+        seed()
+        _trusted_cache = TRUSTED_EXTRA | {r["name"].lower() for r in db.rows(
+            "SELECT name FROM sources WHERE kind = 'feed' AND enabled = 1")}  # fmt: skip
+    return _trusted_cache
+
+
 def _get(url: str, **params: str) -> str:
     r = requests.get(url, params=params or None, headers={"User-Agent": UA}, timeout=TIMEOUT)
     r.raise_for_status()
@@ -117,7 +233,23 @@ def _get(url: str, **params: str) -> str:
 
 
 def _fetch_feed(source: str, url: str) -> list[FeedItem]:
-    return parse_feed(source, _get(url))
+    try:
+        return parse_feed(source, _get(url))
+    except requests.HTTPError as exc:
+        if exc.response is None or exc.response.status_code not in BLOCKED:
+            raise
+        logger.info("sources.feed_blocked %s: reading it through Google News instead", source)
+        return _via_google_news(source, url)
+
+
+def _via_google_news(source: str, url: str) -> list[FeedItem]:
+    """Some sites refuse a server's address (Cloudflare bot checks). Their stories are still in Google News."""
+    host = (urlparse(url).hostname or "").removeprefix("www.")
+    text = _get(GOOGLE_NEWS, q=f"site:{host} when:2d", hl="en-US", gl="US", ceid="US:en")
+    items = parse_feed("", text, google=True)
+    for item in items:
+        item.source = source[:40]  # shows under the feed's own name
+    return sorted(items, key=lambda i: i.published_at, reverse=True)[:15]
 
 
 def _fetch_search(query: str) -> list[FeedItem]:
@@ -129,17 +261,40 @@ def fetch_all(max_age: timedelta) -> list[FeedItem]:
     """Recent items from every feed and search, fetched in parallel; a source that fails is
     skipped."""
     cutoff = datetime.now(UTC) - max_age
-    jobs = [(f"feed {name}", _fetch_feed, (name, url)) for name, url in FEEDS.items()]
-    jobs += [(f"search {q!r}", _fetch_search, (q,)) for q in SEARCHES]
+    active = [r for r in listing() if r["enabled"]]
+    jobs = [(f"feed {r['name']}", _fetch_feed, (r["name"], r["value"]), r["id"]) for r in active if r["kind"] == "feed"]
+    jobs += [(f"search {r['value']!r}", _fetch_search, (r["value"],), r["id"]) for r in active if r["kind"] == "search"]
     out: list[FeedItem] = []
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(fn, *args): label for label, fn, args in jobs}
+        futures = {pool.submit(fn, *args): (label, sid) for label, fn, args, sid in jobs}
         for future in as_completed(futures):
+            label, sid = futures[future]
             try:
-                out += [i for i in future.result() if i.published_at >= cutoff]
+                got = future.result()
+                out += [i for i in got if i.published_at >= cutoff]
+                _health(sid, True, len(got), "")
             except requests.RequestException as exc:
-                logger.warning("sources.fetch_failed %s error=%s", futures[future], exc)
+                logger.warning("sources.fetch_failed %s error=%s", label, exc)
+                _health(sid, False, 0, str(exc))
     return out
+
+
+def _health(source_id: int, ok: bool, items: int, error: str) -> None:
+    """Note how a source answered, so the scout can tell a quiet feed from a dead one. Never raises."""
+    try:
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        old = db.rows("SELECT * FROM source_health WHERE source_id = ?", source_id)
+        if ok:
+            db.execute("INSERT INTO source_health (source_id, ok_at, first_fail_at, fails, items, error) VALUES (?,?,'',0,?,'') "
+                       "ON CONFLICT(source_id) DO UPDATE SET ok_at = excluded.ok_at, first_fail_at = '', fails = 0, items = excluded.items, error = ''",
+                       source_id, now, items)  # fmt: skip
+        else:
+            first = (old[0]["first_fail_at"] if old and old[0]["fails"] else "") or now
+            db.execute("INSERT INTO source_health (source_id, ok_at, first_fail_at, fails, items, error) VALUES (?,'',?,1,0,?) "
+                       "ON CONFLICT(source_id) DO UPDATE SET first_fail_at = ?, fails = source_health.fails + 1, error = excluded.error",
+                       source_id, first, error[:200], first)  # fmt: skip
+    except Exception:  # noqa: BLE001
+        logger.exception("source health note failed")
 
 
 # --------------------------------------------------------------------------- same story
@@ -211,4 +366,4 @@ def group(items: list[FeedItem]) -> list[Story]:
 
 def trusted(story: Story | dict) -> bool:
     outlets = story.outlets if isinstance(story, Story) else story["outlets"]
-    return len(outlets) >= 2 or any(o.lower() in TRUSTED for o in outlets)
+    return len(outlets) >= 2 or any(o.lower() in trusted_outlets() for o in outlets)

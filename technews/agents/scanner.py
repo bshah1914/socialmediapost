@@ -21,17 +21,25 @@ from technews.sources import Story
 
 logger = logging.getLogger(__name__)
 
-CATEGORIES: Final = ("hack", "breach", "vulnerability", "scam", "ai", "bigtech", "launch", "outage",
+CATEGORIES: Final = ("cloud", "devops", "hack", "breach", "vulnerability", "scam", "ai", "bigtech", "launch", "outage",
                      "viral", "policy", "other")  # fmt: skip
+PRIORITY: Final = ("cloud", "devops", "ai")  # the page's first priority: cloud, DevOps and AI news; everything else only fills the gaps
+PRIORITY_BOOST: Final = 2.5
 BATCH: Final = 10  # small batches answer fast
 PARALLEL: Final = 6
 
 SYSTEM: Final = (
     "You are the NEWS SCANNER agent of an Instagram page about the IT / tech world. You read raw "
     "headlines and keep ONLY tech news: cybersecurity (hacks, data breaches, ransomware, zero-days, "
-    "scams, crypto hacks), AI (models, launches, controversies), big tech companies, chips, "
+    "scams, crypto hacks), cloud (AWS, Azure, GCP / Google Cloud, Oracle/IBM cloud, Cloudflare, "
+    "serverless, cloud security, cloud outages, pricing, services and region launches), devops (CI/CD, "
+    "Kubernetes, Docker, Terraform, GitHub/GitLab, Jenkins, SRE, platform engineering, "
+    "infrastructure as code, observability), AI (models, launches, controversies), big tech companies, chips, "
     "software and apps, gadget launches, outages of big services, tech regulation, and tech "
-    "moments going viral online. NOT tech: politics, sports, entertainment, general business or "
+    "moments going viral online. CLOUD AND DEVOPS ARE THE PAGE'S FIRST PRIORITY: tag anything about "
+    "AWS, Azure, GCP or other cloud providers as category cloud (even a cloud breach or outage), "
+    "anything about DevOps tooling and practice as category devops, and score either 2-3 points "
+    "higher than an equally big story in another category. NOT tech: politics, sports, entertainment, general business or "
     "markets, unless the story is about technology itself. Deals, discounts, product reviews, "
     "how-to guides, podcasts and opinion pieces are tech=false.\n"
     "For each headline give: tech (true/false); category (one of "
@@ -70,10 +78,12 @@ def _parse(data: dict, n: int) -> dict[int, Scan]:
             continue
         if 0 <= i < n:
             category = str(row.get("category") or "other").lower()
+            category = category if category in CATEGORIES else "other"
+            score = max(0.0, min(10.0, float(row.get("score") or 0)))
             out[i] = Scan(
                 tech=bool(row.get("tech")),
-                category=category if category in CATEGORIES else "other",
-                score=max(0.0, min(10.0, float(row.get("score") or 0))),
+                category=category,
+                score=min(10.0, score + PRIORITY_BOOST) if category in PRIORITY and score > 0 else score,
                 why=str(row.get("why") or "")[:160],
             )
     return out
@@ -101,6 +111,8 @@ def scan(stories: list[Story]) -> list[Scan]:
 # --------------------------------------------------------------------------- fallback
 
 KEYWORDS: Final[tuple[tuple[str, str, float], ...]] = (
+    ("devops", r"\b(devops|devsecops|ci/cd|cicd|kubernetes|k8s|docker|terraform|ansible|jenkins|gitlab|github actions|helm|argo ?cd|gitops|sre|platform engineering|infrastructure as code|observability|prometheus|grafana|opentofu|pulumi)\b", 7),
+    ("cloud", r"\b(cloud|aws|azure|gcp|kubernetes|k8s|serverless|cloudflare|data ?cent(er|re)s?|hyperscaler)\b", 7),
     ("breach", r"\b(breach(es|ed)?|leak(s|ed)?|expos(es|ed) (data|records|users|customers)|stolen data)\b", 7),
     ("hack", r"\b(hack(ed|ers?)?|ransomware|cyber ?attack|malware|botnet|ddos|spyware)\b", 7),
     ("vulnerability", r"\b(zero[- ]day|cve-\d+|vulnerabilit(y|ies)|exploit(ed)?|patch(es)?)\b", 6),
@@ -121,4 +133,7 @@ def keyword_scan(story: Story) -> Scan:
         return Scan(False, "other", 0.0, "keyword scan: no tech signal")
     category, base = max(hits, key=lambda h: h[1])
     buzz = min(3.0, (len(story.outlets) - 1) * 0.75)  # more outlets, more buzz
+    priority = [cat for cat, _ in hits if cat in PRIORITY]
+    if priority:  # cloud and DevOps outrank whatever else they overlap with
+        category, base = ("cloud" if "cloud" in priority else priority[0]), max(base, 7) + PRIORITY_BOOST
     return Scan(True, category, min(10.0, base + buzz), f"keyword scan: {category}, {len(story.outlets)} outlets")

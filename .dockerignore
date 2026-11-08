@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+data/
+ig-login/
+tests/
+.git/
+.pytest_cache/
+logos/svg/
+*.md

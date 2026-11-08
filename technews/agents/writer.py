@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from technews.agents import llm, reviewer
+from technews.agents import llm, reviewer, team
 from technews.config import settings
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,8 @@ class Draft:
 
 
 DEFAULT_TAGS: Final[dict[str, list[str]]] = {
+    "cloud": ["cloudcomputing", "cloud", "aws", "azure", "technews"],
+    "devops": ["devops", "kubernetes", "cloudnative", "sre", "technews"],
     "hack": ["cybersecurity", "hacking", "infosec", "technews", "cyberattack"],
     "breach": ["databreach", "cybersecurity", "privacy", "technews", "infosec"],
     "vulnerability": ["cybersecurity", "zeroday", "infosec", "technews", "patchnow"],
@@ -80,9 +82,18 @@ def _story_prompt(story: dict[str, Any], angle: str) -> str:
 
 def write(story: dict[str, Any], *, angle: str = "") -> Draft:
     """The approved draft for ``story``. Never raises."""
+    with team.run("writer") as info:
+        draft = _write(story, angle)
+        info["summary"] = f"{draft.writer}: {draft.headline[:70]}"
+    return draft
+
+
+def _write(story: dict[str, Any], angle: str) -> Draft:
     notes: list[str] = []
     if llm.available():
         user = _story_prompt(story, angle)
+        if team.enabled("writer") and (context := team.writer_context()):
+            user = context + "\n\n" + user
         for _attempt in range(2):
             prompt = user + ("\n\nTHE REVIEWER REJECTED YOUR LAST DRAFT. Fix every note:\n- " + "\n- ".join(notes) if notes else "")
             try:

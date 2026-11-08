@@ -20,8 +20,12 @@ from typing import Any, Final
 
 from technews import sources
 from technews.agents import llm
+from technews.agents.scanner import PRIORITY
 
 logger = logging.getLogger(__name__)
+
+PRIORITY_BOOST: Final = 2.0  # cloud and DevOps news come first
+PRIORITY_BAR_DROP: Final = 1.0  # and clear a lower bar than other news
 
 SYSTEM: Final = (
     "You are the REVIEWER agent, editor-in-chief of an Instagram page about the IT / tech world "
@@ -32,7 +36,10 @@ SYSTEM: Final = (
     "outlets; a single unknown source is a rumour). verdict 'post' only for stories that are "
     "clearly big; 'skip' for minor updates, niche vendor news, sponsored or promotional "
     "content, opinion pieces, and anything already old. When two candidates are the same "
-    "story, post at most one. angle: one line on why it matters to an ordinary tech user (what "
+    "story, post at most one. CLOUD, DEVOPS AND AI NEWS ARE THE FIRST PRIORITY: a candidate with category cloud, ai "
+    "or devops wins ties and is posted before anything else; for these, a major provider's (AWS, "
+    "Azure, GCP) or tool's own announcement, release, earnings, outage or big deal is real news, "
+    "not a press release. angle: one line on why it matters to an ordinary tech user (what "
     "it means for them, or what to do). reason: at most 15 words.\n"
     'Reply with ONE JSON object: {"reviews": [{"id": 12, "verdict": "post", "score": 9, '
     '"angle": "...", "reason": "..."}]} with one entry per candidate.'
@@ -77,10 +84,12 @@ def select(candidates: list[dict[str, Any]], *, min_score: float) -> list[Review
                 try:
                     sid = int(row["id"])
                     score = max(0.0, min(10.0, float(row.get("score") or 0)))
+                    if sid in by_id and by_id[sid]["category"] in PRIORITY:
+                        score = min(10.0, score + PRIORITY_BOOST)
                 except (KeyError, TypeError, ValueError):
                     continue
                 if sid in by_id:
-                    reviews[sid] = Review(sid, str(row.get("verdict")).lower() == "post" and score >= min_score,
+                    reviews[sid] = Review(sid, str(row.get("verdict")).lower() == "post" and score >= _bar(by_id[sid], min_score),
                                           score, str(row.get("angle") or "")[:240],
                                           str(row.get("reason") or "")[:200])  # fmt: skip
             logger.info("reviewer.select model=%s candidates=%d", reply.model, len(candidates))
@@ -96,9 +105,16 @@ def select(candidates: list[dict[str, Any]], *, min_score: float) -> list[Review
     return sorted(reviews.values(), key=lambda r: (r.approve, r.score), reverse=True)
 
 
+def _bar(c: dict[str, Any], min_score: float) -> float:
+    """The score a candidate needs to be approved: cloud and DevOps news clear a lower bar."""
+    return min_score - PRIORITY_BAR_DROP if c["category"] in PRIORITY else min_score
+
+
 def fallback_review(c: dict[str, Any], *, min_score: float) -> Review:
     score = min(10.0, float(c["scan_score"]) + min(2.0, (len(c["outlets"]) - 1) * 0.5))
-    return Review(c["id"], score >= min_score, score, "", f"rule review: scan {c['scan_score']}, {len(c['outlets'])} outlets")
+    if c["category"] in PRIORITY:
+        score = min(10.0, score + PRIORITY_BOOST)
+    return Review(c["id"], score >= _bar(c, min_score), score, "", f"rule review: scan {c['scan_score']}, {len(c['outlets'])} outlets")
 
 
 # --------------------------------------------------------------------------- draft check

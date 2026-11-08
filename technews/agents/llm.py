@@ -32,8 +32,12 @@ class ChatResult:
     latency_ms: int
 
 
+def second_ready() -> bool:
+    return bool(settings.LLM2_BASE_URL and settings.LLM2_API_KEY and settings.LLM2_MODEL)
+
+
 def available() -> bool:
-    return bool(settings.NVIDIA_API_KEY)
+    return bool(settings.NVIDIA_API_KEY) or second_ready()
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
@@ -78,17 +82,27 @@ def chat_json(*, system: str, user: str, max_tokens: int = 2000, temperature: fl
     if not available():
         raise LLMError("no NVIDIA_API_KEY configured")
     errors = []
-    for model in model_chain():
+    for model in model_chain() if settings.NVIDIA_API_KEY else []:
         try:
             return _chat_once(system, user, model, max_tokens, temperature)
         except LLMError as exc:
             logger.warning("llm.model_failed model=%s error=%s", model, str(exc)[:200])
             errors.append(f"{model}: {exc}")
+    if second_ready():  # the other provider only gets a turn when NVIDIA could not answer
+        try:
+            result = _chat_once(system, user, settings.LLM2_MODEL, max_tokens, temperature,
+                                base=settings.LLM2_BASE_URL, key=settings.LLM2_API_KEY, extras=False)  # fmt: skip
+            logger.warning("llm.second_provider_used model=%s", settings.LLM2_MODEL)
+            return result
+        except LLMError as exc:
+            logger.warning("llm.second_failed model=%s error=%s", settings.LLM2_MODEL, str(exc)[:200])
+            errors.append(f"{settings.LLM2_MODEL}: {exc}")
     raise LLMError("; ".join(errors)[:500] or "no model configured")
 
 
-def _chat_once(system: str, user: str, model: str, max_tokens: int, temperature: float) -> ChatResult:
-    url = f"{settings.NVIDIA_API_BASE_URL.rstrip('/')}/chat/completions"
+def _chat_once(system: str, user: str, model: str, max_tokens: int, temperature: float, *, base: str = "", key: str = "",
+               extras: bool = True) -> ChatResult:  # fmt: skip
+    url = f"{(base or settings.NVIDIA_API_BASE_URL).rstrip('/')}/chat/completions"
     if not url.startswith("https://"):
         raise LLMError(f"refusing non-HTTPS endpoint {url!r}")
     body = {
@@ -97,14 +111,14 @@ def _chat_once(system: str, user: str, model: str, max_tokens: int, temperature:
         "temperature": temperature,
         "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
-        **_extras(model),
+        **(_extras(model) if extras else {}),
     }
     started = time.monotonic()
     try:
         r = requests.post(
             url,
             json=body,
-            headers={"Authorization": f"Bearer {settings.NVIDIA_API_KEY}", "Accept": "application/json"},
+            headers={"Authorization": f"Bearer {key or settings.NVIDIA_API_KEY}", "Accept": "application/json"},
             timeout=settings.NVIDIA_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:

@@ -1,0 +1,4 @@
+post.cloudtrio.in {
+	encode gzip
+	reverse_proxy newsroom:5000
+}
