@@ -200,6 +200,18 @@ LAYOUTS: Final = (
     ("horizon", "Sunset horizon"),
     ("console", "Terminal"),
     ("impact", "Big number"),
+    ("neon", "Neon city"),
+    ("wave", "Gradient wave"),
+    ("split", "Bold split"),
+    ("stacked", "Stacked cards"),
+    ("gilded", "Dark gold"),
+    ("circuit", "Circuit board"),
+    ("retro", "Synthwave"),
+    ("minimal", "Ultra minimal"),
+    ("cosmic", "Cosmic space"),
+    ("slash", "Diagonal slash"),
+    ("frame", "Geometric frame"),
+    ("blur", "Blurred glass"),
 )
 LAYOUT_IDS: Final = frozenset(k for k, _ in LAYOUTS)
 
@@ -240,6 +252,20 @@ HORIZON: Final = Theme((255, 112, 64), (70, 28, 150), (255, 255, 255), (255, 226
 CONSOLE: Final = Theme((6, 10, 10), (9, 16, 15), (226, 236, 230), (128, 150, 142), (110, 255, 190), (4, 30, 20), (34, 54, 48),
                        (226, 236, 230), radius=10)  # fmt: skip
 IMPACT: Final = Theme((28, 70, 255), (8, 14, 92), (255, 255, 255), (196, 214, 255), (255, 214, 72), (30, 24, 0), (80, 110, 230), (255, 255, 255))
+
+# twelve new layouts
+NEON_CITY: Final = Theme((2, 2, 10), (6, 4, 22), (230, 240, 255), (130, 150, 210), (0, 230, 210), (0, 20, 18), (36, 46, 90), (230, 240, 255), radius=0)
+WAVE_BG: Final = Theme((14, 24, 80), (80, 14, 70), (255, 255, 255), (210, 190, 240), (110, 230, 190), (8, 8, 20), (70, 50, 110), (255, 255, 255))
+SPLIT_BG: Final = Theme((10, 18, 44), (6, 12, 34), (240, 244, 255), (138, 158, 196), (46, 214, 196), (4, 24, 28), (38, 58, 100), (240, 244, 255))
+STACKED: Final = Theme((228, 232, 248), (212, 218, 244), (12, 18, 50), (78, 94, 140), (90, 72, 236), (255, 255, 255), (178, 190, 224), (12, 18, 50))
+GILDED: Final = Theme((6, 4, 2), (18, 14, 4), (240, 228, 188), (158, 138, 88), (210, 172, 68), (8, 6, 0), (58, 44, 14), (240, 228, 188))
+CIRCUIT_BG: Final = Theme((2, 12, 6), (4, 18, 10), (196, 240, 218), (96, 158, 128), (58, 236, 138), (0, 18, 8), (18, 56, 38), (196, 240, 218), radius=10)
+RETRO_WAVE: Final = Theme((14, 4, 40), (6, 2, 68), (248, 220, 255), (176, 138, 220), (255, 56, 158), (18, 0, 28), (58, 28, 98), (248, 220, 255))
+MINIMAL_BG: Final = Theme((255, 255, 255), (246, 248, 255), (12, 18, 50), (96, 112, 150), (82, 50, 220), (255, 255, 255), (198, 208, 234), (12, 18, 50), site_fg=True)
+COSMIC: Final = Theme((2, 2, 8), (4, 4, 18), (236, 242, 255), (136, 146, 192), (96, 158, 255), (4, 10, 40), (28, 34, 80), (236, 242, 255))
+SLASH_BG: Final = Theme((10, 16, 42), (6, 10, 32), (240, 244, 255), (138, 158, 198), (255, 178, 38), (10, 8, 0), (48, 58, 98), (240, 244, 255))
+FRAME_BG: Final = Theme((248, 248, 250), (238, 240, 250), (14, 16, 40), (88, 98, 128), (218, 48, 56), (255, 255, 255), (198, 204, 224), (14, 16, 40), site_fg=True)
+BLUR_BG: Final = Theme((14, 10, 34), (22, 16, 52), (238, 242, 255), (148, 156, 198), (96, 198, 255), (8, 18, 48), (48, 58, 108), (238, 242, 255))
 
 
 # --------------------------------------------------------------------------- colours of your own
@@ -966,16 +992,407 @@ def _impact(flyer: Flyer) -> Image.Image:
     return img
 
 
+def _neon(flyer: Flyer) -> Image.Image:
+    """Cyberpunk neon: corner brackets, glowing accent lines, gradient headline."""
+    th = _theme(flyer, NEON_CITY)
+    img, draw = _canvas(th)
+    _glow(img, W // 2, H // 2, 900, (40, 0, 100), 0.65)
+    _glow(img, 0, 0, 480, th.accent, 0.28)
+    _glow(img, W, H, 560, _acc2(th, 0.5), 0.22)
+    _grain(img, 0.04)
+    lay = _Layer()
+    for cx, cy, sx, sy in ((PAD - 10, 44, 1, 1), (W - PAD + 10, 44, -1, 1), (PAD - 10, H - 44, 1, -1), (W - PAD + 10, H - 44, -1, -1)):
+        for w, a in ((90, 255), (140, 100), (200, 36)):
+            lay.line([(cx, cy), (cx + w * sx, cy)], (*th.accent, a), 3 if a == 255 else 1)
+            lay.line([(cx, cy), (cx, cy + w * sy)], (*th.accent, a), 3 if a == 255 else 1)
+    lay.apply(img)
+    draw = _logo(img, th, 60)
+    kf = _font(28, bold=True)
+    kw = int(draw.textlength(flyer.kicker, font=kf))
+    _glow(img, PAD + kw // 2, 226, kw // 2 + 70, th.accent, 0.45)
+    draw.text((PAD, 226), flyer.kicker, font=kf, fill=th.accent, anchor="lm")
+    plan = _plan(draw, flyer, sizes=(86, 76, 68, 60, 54), lines=4,
+                 avail=lambda h: ROOM - (280 + h + 40), points_width=W - 2 * PAD - 80)
+    y = 272
+    for i, line in enumerate(plan.hlines):
+        t = i / max(1, len(plan.hlines) - 1)
+        _grad_text(img, (PAD, y), line, plan.hfont, _mix(th.fg, th.accent, t * 0.6), th.accent)
+        y += int(plan.hfont.size * 1.16)
+    y += 38
+    for block in plan.blocks:
+        _glow(img, PAD + 22, y + plan.step // 2, 32, th.accent, 0.75)
+        draw.line([(PAD, y + plan.step // 2 - 2), (PAD + 48, y + plan.step // 2 - 2)], fill=th.accent, width=4)
+        for line in block:
+            draw.text((PAD + 72, y), line, font=plan.pfont, fill=th.fg)
+            y += plan.step
+        y += 24
+    _footer(draw, th, flyer)
+    return img
+
+
+def _wave(flyer: Flyer) -> Image.Image:
+    """Layered gradient waves with a frosted content panel."""
+    th = _theme(flyer, WAVE_BG)
+    img, draw = _canvas(th)
+    c2 = _acc2(th, 0.4)
+    lay = _Layer()
+    for i, (y0, cy, a, col) in enumerate(((0, 420, 110, th.accent), (200, 650, 90, c2), (380, 850, 70, th.top))):
+        pts = [(0, y0)]
+        for x in range(0, W + 1, 54):
+            amp = 60 + 20 * (i % 2)
+            pts.append((x, cy + amp * math.sin(math.pi * x / 320 + i * 1.4)))
+        pts += [(W, 0)]
+        lay.polygon(pts, fill=(*col, a))
+    lay.apply(img)
+    _grain(img, 0.04)
+    _glass(img, (PAD - 24, 170, W - PAD + 24, FOOT_TOP - 20), 44)
+    draw = _logo(img, th, 60)
+    plan = _plan(draw, flyer, sizes=(84, 74, 66, 58, 52), lines=4,
+                 avail=lambda h: ROOM - (296 + h + 36), points_width=W - 2 * PAD - 80)
+    _pill(draw, th, flyer.kicker, 196, center=True)
+    y = _title(draw, plan, 296, th.fg, center=True) + 36
+    _points(draw, plan, y, fill=th.accent, ink=th.on_accent, text=th.fg, x=PAD)
+    _footer(draw, th, flyer, center=True, x0=PAD, img=img, grad=(th.accent, c2))
+    return img
+
+
+def _split(flyer: Flyer) -> Image.Image:
+    """Bold vertical split: accent column on the left, dark panel on the right."""
+    th = _theme(flyer, SPLIT_BG)
+    img, draw = _canvas(th)
+    col_w = 220
+    lay = _Layer()
+    lay.rrect((-4, -4, col_w, H + 4), 0, fill=(*th.accent, 255))
+    lay.apply(img)
+    _glow(img, col_w // 2, H // 2, col_w * 1.4, _mix(th.accent, (255, 255, 255), 0.3), 0.35)
+    _grain(img, 0.04)
+    logo = brand.lockup(72, text_color=th.on_accent)
+    img.paste(logo, (col_w - logo.width - 20, 60), logo)
+    draw = ImageDraw.Draw(img)
+    for yy in range(200, H - 200, 90):
+        draw.line([(col_w - 24, yy), (col_w - 24, yy + 44)], fill=(*th.on_accent, 60), width=2)
+    kf = _font(26, bold=True)
+    kw = int(draw.textlength(flyer.kicker, font=kf))
+    draw.rounded_rectangle([col_w + PAD, 190, col_w + PAD + kw + 42, 240], radius=24, fill=(*th.accent, 50), outline=(*th.accent, 180), width=2)
+    draw.text((col_w + PAD + 21, 215), flyer.kicker, font=kf, fill=th.accent, anchor="lm")
+    plan = _plan(draw, flyer, sizes=(82, 74, 66, 58, 52), lines=4,
+                 avail=lambda h: ROOM - (280 + h + 36), points_width=W - col_w - PAD - 60,
+                 head_width=W - col_w - PAD - 20)
+    y = _title(draw, plan, 280, th.fg, x=col_w + PAD) + 36
+    _points(draw, plan, y, fill=th.accent, ink=th.on_accent, text=th.fg, x=col_w + PAD)
+    _footer(draw, th, flyer, x0=col_w + PAD)
+    return img
+
+
+def _stacked(flyer: Flyer) -> Image.Image:
+    """Each benefit floats on its own raised card — a light layered look."""
+    th = _theme(flyer, STACKED)
+    img, draw = _canvas(th)
+    c2 = _acc2(th, 0.12)
+    _glow(img, W - 80, 80, 500, th.accent, 0.18)
+    _glow(img, 60, H - 200, 460, c2, 0.14)
+    draw = _logo(img, th, 60)
+    kf = _font(28, bold=True)
+    kw = int(draw.textlength(flyer.kicker, font=kf))
+    draw.rounded_rectangle([PAD, 192, PAD + kw + 50, 244], radius=27,
+                            fill=_mix(th.accent, (255, 255, 255), 0.84))
+    draw.text((PAD + 25, 218), flyer.kicker, font=kf, fill=th.accent, anchor="lm")
+    plan = _plan(draw, flyer, sizes=(82, 74, 66, 58, 52), lines=3,
+                 avail=lambda h: ROOM - (280 + h + 44), points_width=W - 2 * PAD - 100,
+                 extra=72, min_block=110)
+    y = _title(draw, plan, 280, _mix(th.fg, th.accent, 0.08)) + 44
+    for i, block in enumerate(plan.blocks):
+        depth = i * 14
+        h = max(96, len(block) * plan.step + 44)
+        box = (PAD + depth, y, W - PAD, y + h)
+        _shadow(img, box, 32, color=_mix(th.accent, (20, 20, 60), 0.6), alpha=0.14, dy=10)
+        draw.rounded_rectangle(box, radius=32, fill=(255, 255, 255), outline=_mix(th.line, th.accent, 0.2), width=2)
+        _grad_fill(img, (PAD + depth + 26, y + (h - 52) // 2, PAD + depth + 78, y + (h - 52) // 2 + 52),
+                   26, th.accent, c2, "d")
+        cy = y + h // 2
+        draw.line([(PAD + depth + 37, cy), (PAD + depth + 46, cy + 8),
+                   (PAD + depth + 60, cy - 8)], fill=(255, 255, 255), width=5, joint="curve")
+        ty = y + (h - len(block) * plan.step) // 2
+        for line in block:
+            draw.text((PAD + depth + 104, ty), line, font=plan.pfont, fill=th.fg)
+            ty += plan.step
+        y += h + 14
+    _footer(draw, th, flyer, img=img, grad=(th.accent, c2))
+    return img
+
+
+def _gilded(flyer: Flyer) -> Image.Image:
+    """Near-black with metallic gold — the premium look."""
+    th = _theme(flyer, GILDED)
+    img, draw = _canvas(th)
+    _glow(img, W - 100, 180, 500, (140, 100, 20), 0.4)
+    _glow(img, 60, H - 300, 480, (100, 60, 10), 0.3)
+    _grain(img, 0.05)
+    for i, yy in enumerate(range(0, H, 180)):
+        a = 22 if i % 2 == 0 else 12
+        draw.line([(0, yy), (W, yy)], fill=(*th.accent, a), width=1)
+    draw = _logo(img, th, 60)
+    kf = _font(28, bold=True)
+    kw = int(draw.textlength(flyer.kicker, font=kf))
+    _grad_fill(img, (PAD - 4, 192, PAD + kw + 56, 244), 24, th.accent, _acc2(th, 0.08), "h")
+    draw.text((PAD + 24, 218), flyer.kicker, font=kf, fill=_ink_for(th.accent), anchor="lm")
+    plan = _plan(draw, flyer, sizes=(86, 76, 68, 60, 54), lines=4,
+                 avail=lambda h: ROOM - (288 + h + 36), points_width=W - 2 * PAD - 80)
+    y = 288
+    for i, line in enumerate(plan.hlines):
+        t = i / max(1, len(plan.hlines) - 1)
+        _grad_text(img, (PAD, y), line, plan.hfont, _mix(th.fg, th.accent, 0.4 * t), th.accent)
+        y += int(plan.hfont.size * 1.16)
+    y += 24
+    draw.line([(PAD, y), (PAD + 200, y)], fill=th.accent, width=2)
+    y += 32
+    for i, block in enumerate(plan.blocks, 1):
+        bw = int(draw.textlength(str(i), font=_font(26, bold=True))) + 32
+        _grad_fill(img, (PAD, y, PAD + bw, y + 44), 22, th.accent, _acc2(th, 0.08), "d")
+        draw.text((PAD + bw // 2, y + 22), str(i), font=_font(26, bold=True),
+                  fill=_ink_for(th.accent), anchor="mm")
+        for line in block:
+            draw.text((PAD + bw + 24, y), line, font=plan.pfont, fill=th.fg)
+            y += plan.step
+        y += 24
+    _footer(draw, th, flyer)
+    return img
+
+
+def _circuit(flyer: Flyer) -> Image.Image:
+    """PCB circuit traces: a grid of routing lines with solder pads at junctions."""
+    th = _theme(flyer, CIRCUIT_BG)
+    img, draw = _canvas(th)
+    _glow(img, 160, 100, 440, th.accent, 0.14)
+    _glow(img, W - 80, H - 200, 420, _acc2(th, 0.25), 0.1)
+    lay = _Layer()
+    grid_xs = [120, 310, 540, 760, 970]
+    grid_ys = [160, 380, 620, 860, 1050, 1200]
+    for gx in grid_xs:
+        lay.line([(gx, 0), (gx, H)], (*th.accent, 28), 2)
+    for gy in grid_ys:
+        lay.line([(0, gy), (W, gy)], (*th.accent, 28), 2)
+    for gx in grid_xs:
+        for gy in grid_ys:
+            r = 10
+            lay.ellipse((gx - r, gy - r, gx + r, gy + r), fill=(*th.accent, 50), outline=(*th.accent, 130), width=2)
+    for cx, cy, sz, a in ((44, 44, 36, 180), (W - 44, 44, 36, 180), (44, H - 44, 36, 180), (W - 44, H - 44, 36, 180)):
+        lay.rrect((cx - sz, cy - sz, cx + sz, cy + sz), 6, outline=(*th.accent, a), width=3)
+        lay.rrect((cx - sz // 2, cy - sz // 2, cx + sz // 2, cy + sz // 2), 3, fill=(*th.accent, 60))
+    lay.apply(img)
+    _grain(img, 0.03)
+    draw = _logo(img, th, 60)
+    mf = _mono(26, bold=True)
+    slug = re.sub(r"[^a-z0-9]+", "-", flyer.kicker.lower()).strip("-")[:30]
+    draw.text((PAD, 196), f"// {slug}", font=mf, fill=th.accent)
+    plan = _plan(draw, flyer, sizes=(84, 74, 66, 58, 52), lines=4, avail=lambda h: ROOM - (276 + h + 36),
+                 points_width=W - 2 * PAD - 80)
+    draw.line([(PAD, 268), (W - PAD, 268)], fill=(*th.accent, 60), width=1)
+    y = _title(draw, plan, 282, th.fg) + 32
+    draw.line([(PAD, y), (W - PAD, y)], fill=(*th.accent, 60), width=1)
+    y += 32
+    _points(draw, plan, y, fill=th.accent, ink=th.on_accent, text=th.fg, marker="square")
+    _footer(draw, th, flyer)
+    return img
+
+
+def _retro(flyer: Flyer) -> Image.Image:
+    """80s synthwave: scanlines, perspective grid, hot-pink-to-cyan headline."""
+    th = _theme(flyer, RETRO_WAVE)
+    img, draw = _canvas(th)
+    c2 = _acc2(th, 0.5)
+    _glow(img, W // 2, -60, 700, th.accent, 0.4, squash=0.6)
+    _glow(img, W // 2, H + 60, 600, c2, 0.3, squash=0.5)
+    _grain(img, 0.04)
+    for yy in range(0, H, 7):
+        draw.line([(0, yy), (W, yy)], fill=(0, 0, 0, 18), width=1)
+    horizon_y = int(H * 0.72)
+    for i in range(14):
+        t = i / 13
+        y_line = horizon_y + int((H - horizon_y) * t ** 1.4)
+        x_offset = int((W // 2) * (1 - (1 - t) ** 2))
+        draw.line([(W // 2 - x_offset, y_line), (W // 2 + x_offset, y_line)],
+                  fill=(*th.accent, int(60 * (1 - t) + 10)), width=1)
+    for i in range(9):
+        t = i / 8
+        x = int(W // 2 * t)
+        y_top = horizon_y + int((H - horizon_y) * (t ** 1.4) * 0.1)
+        draw.line([(W // 2 - (W // 2 - x), horizon_y), (W // 2 - (W // 2 - x), H)],
+                  fill=(*c2, int(50 * (1 - t) + 8)), width=1)
+    draw = _logo(img, th, 60)
+    kf = _font(28, bold=True)
+    kw = int(draw.textlength(flyer.kicker, font=kf))
+    _glow(img, PAD + kw // 2 + 20, 220, kw // 2 + 60, th.accent, 0.5)
+    draw.text((PAD + 20, 220), flyer.kicker, font=kf, fill=th.accent, anchor="lm")
+    plan = _plan(draw, flyer, sizes=(92, 82, 72, 64, 56), lines=4,
+                 avail=lambda h: ROOM - (276 + h + 36), points_width=W - 2 * PAD - 80)
+    y = 272
+    for line in plan.hlines:
+        _grad_text(img, (PAD, y), line, plan.hfont, th.accent, c2)
+        y += int(plan.hfont.size * 1.16)
+    y += 36
+    for block in plan.blocks:
+        draw.line([(PAD, y + plan.step // 2 - 2), (PAD + 44, y + plan.step // 2 - 2)], fill=th.accent, width=4)
+        draw.line([(PAD, y + plan.step // 2 - 2), (PAD + 44, y + plan.step // 2 - 2)], fill=(*c2, 100), width=12)
+        for line in block:
+            draw.text((PAD + 68, y), line, font=plan.pfont, fill=th.fg)
+            y += plan.step
+        y += 24
+    _footer(draw, th, flyer)
+    return img
+
+
+def _minimal(flyer: Flyer) -> Image.Image:
+    """Ultra-clean: a solid accent stripe on the left, pure white on the right."""
+    th = _theme(flyer, MINIMAL_BG)
+    img, draw = _canvas(th)
+    stripe = 160
+    lay = _Layer()
+    lay.rrect((-4, -4, stripe, H + 4), 0, fill=(*th.accent, 255))
+    lay.apply(img)
+    logo = brand.lockup(72, text_color=th.on_accent)
+    img.paste(logo, ((stripe - logo.width) // 2, 60), logo) if logo.width < stripe else img.paste(logo, (12, 60), logo)
+    draw = ImageDraw.Draw(img)
+    for i in range(1, 7):
+        yy = 160 + i * (H - 220) // 7
+        draw.line([(stripe // 2 - 16, yy), (stripe // 2 + 16, yy)], fill=(*th.on_accent, 60), width=2)
+    kf = _font(26, bold=True)
+    kw = int(draw.textlength(flyer.kicker, font=kf))
+    draw.text((stripe + PAD, 196), flyer.kicker, font=kf, fill=th.accent, anchor="lm")
+    draw.line([(stripe + PAD, 220), (stripe + PAD + kw, 220)], fill=th.accent, width=3)
+    plan = _plan(draw, flyer, sizes=(84, 76, 68, 60, 54), lines=4,
+                 avail=lambda h: ROOM - (256 + h + 44), points_width=W - stripe - PAD - 44,
+                 head_width=W - stripe - PAD - 20)
+    y = _title(draw, plan, 256, th.fg, x=stripe + PAD) + 44
+    _points(draw, plan, y, fill=th.accent, ink=th.on_accent, text=th.fg, x=stripe + PAD)
+    _footer(draw, th, flyer, x0=stripe + PAD)
+    return img
+
+
+def _cosmic(flyer: Flyer) -> Image.Image:
+    """Deep space: scattered stars, nebula glows, orbital rings."""
+    import random as _rng
+    th = _theme(flyer, COSMIC)
+    img, draw = _canvas(th)
+    c2 = _acc2(th, 0.3)
+    _glow(img, W // 2, H // 2, 820, (20, 10, 60), 0.8)
+    _glow(img, W * 0.7, H * 0.3, 420, th.accent, 0.28)
+    _glow(img, W * 0.2, H * 0.65, 380, c2, 0.22)
+    rnd = _rng.Random(42)
+    for _ in range(140):
+        sx, sy = rnd.randint(0, W), rnd.randint(0, H)
+        sr, sa = rnd.choice((1, 1, 1, 2)), rnd.randint(80, 220)
+        draw.ellipse((sx - sr, sy - sr, sx + sr, sy + sr), fill=(*th.fg, sa))
+    lay = _Layer()
+    for r, a in ((310, 25), (430, 16), (560, 10)):
+        lay.arc((W // 2 - r, H // 2 - r * 2 // 3, W // 2 + r, H // 2 + r * 2 // 3),
+                -30, 210, (*th.accent, a), 2)
+    lay.apply(img)
+    _grain(img, 0.04)
+    draw = _logo(img, th, 60, center=True)
+    plan = _plan(draw, flyer, sizes=(86, 76, 68, 60, 54), lines=4,
+                 avail=lambda h: ROOM - (296 + h + 36), points_width=W - 2 * PAD - 80)
+    _pill(draw, th, flyer.kicker, 196, center=True)
+    y = _title(draw, plan, 296, th.fg, center=True) + 36
+    _points(draw, plan, y, fill=th.accent, ink=th.on_accent, text=th.fg)
+    _footer(draw, th, flyer, center=True, x0=PAD)
+    return img
+
+
+def _slash(flyer: Flyer) -> Image.Image:
+    """Dynamic diagonal band of accent colour cutting across the card."""
+    th = _theme(flyer, SLASH_BG)
+    img, draw = _canvas(th)
+    _glow(img, W * 0.6, H * 0.28, 540, th.accent, 0.3, squash=0.7)
+    _grain(img, 0.04)
+    lay = _Layer()
+    band_top, band_bot, skew = 130, 460, 160
+    pts = [(skew, band_top), (W + 10, band_top), (W + 10, band_bot), (-10, band_bot), (skew - 160, band_top)]
+    lay.polygon(pts, fill=(*th.accent, 230))
+    lay.apply(img)
+    draw = _logo(img, th, 60)
+    band_mid = (band_top + band_bot) // 2
+    kf = _font(32, bold=True)
+    ink = _ink_for(th.accent)
+    draw.text((W // 2, band_mid), flyer.kicker.upper(), font=kf, fill=ink, anchor="mm")
+    plan = _plan(draw, flyer, sizes=(86, 76, 68, 60, 54), lines=4,
+                 avail=lambda h: ROOM - (490 + h + 36), points_width=W - 2 * PAD - 80)
+    y = _title(draw, plan, 490, th.fg) + 36
+    for block in plan.blocks:
+        draw.rectangle([PAD, y + 8, PAD + 8, y + 8 + plan.step - 4], fill=th.accent)
+        for line in block:
+            draw.text((PAD + 32, y), line, font=plan.pfont, fill=th.fg)
+            y += plan.step
+        y += 24
+    _footer(draw, th, flyer)
+    return img
+
+
+def _frame(flyer: Flyer) -> Image.Image:
+    """Architectural double frame with corner diamonds — structured, authoritative."""
+    th = _theme(flyer, FRAME_BG)
+    img, draw = _canvas(th)
+    _glow(img, W // 2, H // 2, 700, _mix(th.accent, (255, 255, 255), 0.5), 0.14)
+    bw = 22
+    for shrink, weight in ((0, 5), (bw + 10, 2)):
+        pad = shrink
+        draw.rounded_rectangle([pad, pad, W - pad, H - pad], radius=max(0, 36 - shrink),
+                                outline=th.accent, width=weight)
+    diamond = 32
+    for cx, cy in ((bw + 48, bw + 48), (W - bw - 48, bw + 48), (bw + 48, H - bw - 48), (W - bw - 48, H - bw - 48)):
+        pts = [(cx, cy - diamond), (cx + diamond, cy), (cx, cy + diamond), (cx - diamond, cy)]
+        draw.polygon(pts, fill=th.accent)
+        draw.polygon(pts, outline=_mix(th.accent, (255, 255, 255), 0.3), width=2)
+    draw = _logo(img, th, 70, center=True)
+    plan = _plan(draw, flyer, sizes=(86, 76, 68, 60, 54), lines=4,
+                 avail=lambda h: ROOM - (296 + h + 36), points_width=W - 2 * PAD - 80)
+    kf = _font(26, bold=True)
+    kw = int(draw.textlength(flyer.kicker, font=kf))
+    draw.line([(W // 2 - kw // 2 - 20, 206), (W // 2 + kw // 2 + 20, 206)], fill=th.accent, width=2)
+    draw.text((W // 2, 226), flyer.kicker, font=kf, fill=th.accent, anchor="mm")
+    draw.line([(W // 2 - kw // 2 - 20, 246), (W // 2 + kw // 2 + 20, 246)], fill=th.accent, width=2)
+    y = _title(draw, plan, 290, th.fg, center=True) + 36
+    _points(draw, plan, y, fill=th.accent, ink=th.on_accent, text=th.fg, marker="num")
+    _footer(draw, th, flyer, center=True, x0=PAD)
+    return img
+
+
+def _blur(flyer: Flyer) -> Image.Image:
+    """Soft blurred colour blobs with a frosted glass content panel."""
+    th = _theme(flyer, BLUR_BG)
+    img, draw = _canvas(th)
+    c2 = _acc2(th, 0.35)
+    for cx, cy, r, col, a in ((180, 220, 360, th.accent, 0.55), (W - 100, 580, 420, c2, 0.45),
+                               (140, 1050, 340, th.accent, 0.35), (W - 80, 1200, 380, c2, 0.4)):
+        _glow(img, cx, cy, r, col, a)
+    _grain(img, 0.04)
+    _glass(img, (PAD - 28, 164, W - PAD + 28, FOOT_TOP - 20), 52)
+    draw = _logo(img, th, 60)
+    plan = _plan(draw, flyer, sizes=(84, 74, 66, 58, 52), lines=4,
+                 avail=lambda h: ROOM - (296 + h + 36), points_width=W - 2 * PAD - 80)
+    _pill(draw, th, flyer.kicker, 192)
+    y = _title(draw, plan, 290, th.fg) + 36
+    _points(draw, plan, y, fill=th.accent, ink=th.on_accent, text=th.fg)
+    _footer(draw, th, flyer, img=img, grad=(th.accent, c2))
+    return img
+
+
 _DRAW: Final = {
     "classic": _classic, "aurora": _aurora, "blueprint": _blueprint, "stage": _stage, "studio": _studio,
     "bento": _bento, "horizon": _horizon, "console": _console, "impact": _impact,
+    "neon": _neon, "wave": _wave, "split": _split, "stacked": _stacked, "gilded": _gilded,
+    "circuit": _circuit, "retro": _retro, "minimal": _minimal, "cosmic": _cosmic,
+    "slash": _slash, "frame": _frame, "blur": _blur,
 }  # fmt: skip
 
 
 # --------------------------------------------------------------------------- the studio: palettes and advice
 
 BASES: Final = {"classic": DARK, "aurora": AURORA, "blueprint": BLUEPRINT, "stage": STAGE, "studio": STUDIO, "bento": BENTO,
-                "horizon": HORIZON, "console": CONSOLE, "impact": IMPACT}  # fmt: skip
+                "horizon": HORIZON, "console": CONSOLE, "impact": IMPACT,
+                "neon": NEON_CITY, "wave": WAVE_BG, "split": SPLIT_BG, "stacked": STACKED, "gilded": GILDED,
+                "circuit": CIRCUIT_BG, "retro": RETRO_WAVE, "minimal": MINIMAL_BG, "cosmic": COSMIC,
+                "slash": SLASH_BG, "frame": FRAME_BG, "blur": BLUR_BG}  # fmt: skip
 
 #: Ready-made colour sets: background, second background (equal for a flat colour), text, accent.
 PALETTES: Final = (
