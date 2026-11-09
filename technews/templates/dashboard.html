@@ -797,7 +797,7 @@
               <button class="btn ghost" type="button" onclick="reelSet({{ p.id }}, true, this)">{{ "Redo the Reel" if reel.video else "Make it a Reel" }}</button>
               {% if reel.video %}<button class="btn ghost" type="button" onclick="reelSet({{ p.id }}, false, this)">Post as a picture</button>{% endif %}
               <button class="btn ghost" id="reel-preview-{{ p.id }}" type="button" {{ '' if reel.video else 'hidden' }}
-                onclick="previewReel('{{ reel.video }}','{{ reel.cover }}','{{ p.headline|e }}',$('rs-{{ p.id }}')?.value,$('rt-{{ p.id }}')?.value)">▶ Preview Reel</button>
+                onclick="reelPreviewApprovals({{ p.id }}, this)" title="Re-renders with the currently selected style, then shows the result">▶ Preview with this style</button>
             </div>
             <details style="margin-top:6px"><summary>Animated text: words to highlight, big number, stamp</summary>
               <div class="two" style="margin-top:8px">
@@ -853,7 +853,7 @@
             {% endif %}
             <div class="row" style="margin-top:12px">
               <button class="btn" type="button" onclick="reelApprove({{ p.id }}, this)">Approve &amp; post as Reel</button>
-              {% if reel.video %}<button class="btn ghost" type="button" onclick="previewReel('{{ reel.video }}','{{ reel.cover }}','{{ p.headline|e }}','{{ reel.style }}','{{ reel.track }}')">▶ Preview fullscreen</button>{% endif %}
+              <button class="btn ghost" type="button" onclick="reelSetR({{ p.id }}, this)" title="Re-renders with selected style and opens preview">▶ Preview with this style</button>
               <button class="btn ghost" type="button" onclick="decide({{ p.id }}, 'reject', this)">Reject</button>
             </div>
             <div class="msg" id="reel-msg-{{ p.id }}" role="status" aria-live="polite"></div>
@@ -1774,27 +1774,29 @@
     v.load();
     dlg.showModal();
   }
+  function _injectInlineVideo(id, d) {
+    // replace still image with inline video player in the Approvals card, no page reload
+    const card = document.getElementById("post-" + id);
+    if (!card) return;
+    const imgDiv = card.querySelector("div:first-child");
+    if (imgDiv) {
+      imgDiv.innerHTML = `<video src="/cards/${d.video}" poster="/cards/${d.cover}" controls playsinline preload="metadata"
+        style="width:100%;max-height:70vh;border-radius:12px;background:#000" aria-label="Reel preview"></video>`;
+    }
+    const makeBtn = card.querySelector(`button[onclick*="reelSet(${id}, true"]`);
+    if (makeBtn) makeBtn.textContent = "Redo the Reel";
+    const pBtn = document.getElementById(`reel-preview-${id}`);
+    if (pBtn) pBtn.hidden = false;
+  }
   async function reelSet(id, on, btn) {
-    btn.disabled = true; const label = btn.textContent; btn.textContent = on ? "Making the Reel…" : "Working…";
+    btn.disabled = true; const label = btn.textContent; btn.textContent = on ? "Rendering…" : "Working…";
     try {
       const [ok, d] = await api(`/api/posts/${id}/reel`, { on, style: $("rs-" + id).value, track: $("rt-" + id).value,
         highlight: $("rh-" + id) ? $("rh-" + id).value : undefined, number: $("rn-" + id) ? $("rn-" + id).value : undefined, badge: $("rb-" + id) ? $("rb-" + id).value : undefined });
       if (ok && on && d.video) {
-        // swap the still image for an inline video preview — no page reload needed
-        const card = document.getElementById("post-" + id);
-        if (card) {
-          const imgDiv = card.querySelector("div:first-child");
-          if (imgDiv) {
-            imgDiv.innerHTML = `<video src="/cards/${d.video}" poster="/cards/${d.cover}" controls playsinline preload="metadata"
-              style="width:100%;max-height:70vh;border-radius:12px;background:#000" aria-label="Reel preview"></video>`;
-          }
-          // swap button labels
-          const makeBtn = card.querySelector(`button[onclick*="reelSet(${id}, true"]`);
-          if (makeBtn) makeBtn.textContent = "Redo the Reel";
-          const pBtn = card.querySelector(`[id="reel-preview-${id}"]`);
-          if (pBtn) { pBtn.hidden = false; pBtn.onclick = () => previewReel(d.video, d.cover, card.querySelector("h2")?.textContent || "", d.style, d.track); }
-        }
-        toast("Reel ready — preview is playing below.", false);
+        _injectInlineVideo(id, d);
+        const title = document.querySelector(`#post-${id} h2`)?.textContent || "";
+        previewReel(d.video, d.cover, title, d.style, d.track);
       } else if (ok && !on) {
         toast("It will be posted as a picture.", false);
         setTimeout(() => location.reload(), 700);
@@ -1803,17 +1805,42 @@
       }
     } finally { btn.disabled = false; btn.textContent = label; }
   }
-  async function reelSetR(id, btn) {
-    btn.disabled = true; const label = btn.textContent; btn.textContent = "Making the Reel…";
+
+  async function reelPreviewApprovals(id, btn) {
+    // "▶ Preview with this style" in Approvals: re-renders with current dropdown values then shows dialog
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "Rendering…";
     try {
-      const style = $("rrs-" + id) ? $("rrs-" + id).value : "auto";
-      const track = $("rrt-" + id) ? $("rrt-" + id).value : "upbeat";
-      const highlight = $("rrh-" + id) ? $("rrh-" + id).value : "";
-      const number   = $("rrn-" + id) ? $("rrn-" + id).value : "";
-      const badge    = $("rrb-" + id) ? $("rrb-" + id).value : "";
+      const style = $("rs-" + id)?.value || "auto";
+      const track = $("rt-" + id)?.value || "upbeat";
+      const highlight = $("rh-" + id)?.value || "";
+      const number = $("rn-" + id)?.value || "";
+      const badge  = $("rb-" + id)?.value || "";
       const [ok, d] = await api(`/api/posts/${id}/reel`, { on: true, style, track, highlight, number, badge });
-      toast(ok ? "Reel redone. Reload to preview." : (d.reason || d.error || "That did not work."), !ok);
-      if (ok) setTimeout(() => location.reload(), 800);
+      if (ok && d.video) {
+        _injectInlineVideo(id, d);
+        const title = document.querySelector(`#post-${id} h2`)?.textContent || "";
+        previewReel(d.video, d.cover, title, d.style, d.track);
+      } else {
+        toast(d.reason || d.error || "That did not work.", true);
+      }
+    } finally { btn.disabled = false; btn.textContent = label; }
+  }
+  async function reelSetR(id, btn) {
+    // "Redo Reel" in Reels section: re-renders with current dropdown values and opens preview
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "Rendering…";
+    try {
+      const style = $("rrs-" + id)?.value || "auto";
+      const track = $("rrt-" + id)?.value || "upbeat";
+      const highlight = $("rrh-" + id)?.value || "";
+      const number   = $("rrn-" + id)?.value || "";
+      const badge    = $("rrb-" + id)?.value || "";
+      const [ok, d] = await api(`/api/posts/${id}/reel`, { on: true, style, track, highlight, number, badge });
+      if (ok && d.video) {
+        const title = document.querySelector(`#reel-${id} h2`)?.textContent || "";
+        previewReel(d.video, d.cover, title, d.style, d.track);
+      } else {
+        toast(d.reason || d.error || "That did not work.", true);
+      }
     } finally { btn.disabled = false; btn.textContent = label; }
   }
   async function reelApprove(id, btn) {
