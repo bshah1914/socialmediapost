@@ -797,7 +797,7 @@
               <button class="btn ghost" type="button" onclick="reelSet({{ p.id }}, true, this)">{{ "Redo the Reel" if reel.video else "Make it a Reel" }}</button>
               {% if reel.video %}<button class="btn ghost" type="button" onclick="reelSet({{ p.id }}, false, this)">Post as a picture</button>{% endif %}
               <button class="btn ghost" id="reel-preview-{{ p.id }}" type="button" {{ '' if reel.video else 'hidden' }}
-                onclick="previewReel('{{ reel.video }}','{{ reel.cover }}','{{ p.headline|e }}')">▶ Preview Reel</button>
+                onclick="previewReel('{{ reel.video }}','{{ reel.cover }}','{{ p.headline|e }}',$('rs-{{ p.id }}')?.value,$('rt-{{ p.id }}')?.value)">▶ Preview Reel</button>
             </div>
             <details style="margin-top:6px"><summary>Animated text: words to highlight, big number, stamp</summary>
               <div class="two" style="margin-top:8px">
@@ -853,7 +853,7 @@
             {% endif %}
             <div class="row" style="margin-top:12px">
               <button class="btn" type="button" onclick="reelApprove({{ p.id }}, this)">Approve &amp; post as Reel</button>
-              {% if reel.video %}<button class="btn ghost" type="button" onclick="previewReel('{{ reel.video }}','{{ reel.cover }}','{{ p.headline|e }}')">▶ Preview fullscreen</button>{% endif %}
+              {% if reel.video %}<button class="btn ghost" type="button" onclick="previewReel('{{ reel.video }}','{{ reel.cover }}','{{ p.headline|e }}','{{ reel.style }}','{{ reel.track }}')">▶ Preview fullscreen</button>{% endif %}
               <button class="btn ghost" type="button" onclick="decide({{ p.id }}, 'reject', this)">Reject</button>
             </div>
             <div class="msg" id="reel-msg-{{ p.id }}" role="status" aria-live="polite"></div>
@@ -1418,8 +1418,16 @@
 
 <dialog id="dlg" aria-labelledby="dlg-title">
   <div class="bd">
-    <div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><b id="dlg-title"></b>
-      <button class="btn ghost sm" type="button" onclick="closeDlg()">Close</button></div>
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:start">
+      <div>
+        <b id="dlg-title"></b>
+        <div id="dlg-reel-info" hidden style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">
+          <span class="pill low" id="dlg-style-badge"></span>
+          <span class="pill low" id="dlg-track-badge"></span>
+        </div>
+      </div>
+      <button class="btn ghost sm" type="button" onclick="closeDlg()">Close</button>
+    </div>
     <img id="dlg-img" alt="">
     <video id="dlg-video" controls playsinline preload="metadata" hidden
            style="width:100%;max-height:80vh;border-radius:12px;background:#000;display:block"></video>
@@ -1559,6 +1567,8 @@
 <script>
   const D = JSON.parse(document.getElementById("data").textContent);
   const THEMES = {{ flyer_themes|tojson }}, PALETTES = {{ flyer_palettes|tojson }}, PENDING_META = {{ pending_meta|tojson }};
+  const REEL_STYLE_LABELS = { {% for k, l in reel_styles %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
+  const REEL_TRACK_LABELS = { {% for k, l in reel_tracks %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
   const NEWSROOM_KEYS = ["BLOCKED_WORDS","WATCHDOG_MINUTES","SCAN_INTERVAL_MINUTES","SCAN_MAX_AGE_HOURS","SCAN_MIN_SCORE","REVIEW_MIN_SCORE","FLYER_AFTER_NEWS","APPROVAL_QUEUE_MAX","TIMEZONE","FLYERS_ENABLED"];
   const NOTIFY_KEYS = ["PUBLIC_URL","NOTIFY_EMAIL_TO","SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","WHATSAPP_PROVIDER","WHATSAPP_TO","WHATSAPP_APIKEY","TWILIO_SID","TWILIO_WHATSAPP_FROM","TELEGRAM_BOT_TOKEN","TELEGRAM_CHAT_ID","NOTIFY_WEBHOOK_URL"];
   const PENDING = {{ status.pending }}, REELS_PENDING = {{ status.reels_pending }}, CHANNELS = {{ status.notify|tojson }};
@@ -1665,6 +1675,7 @@
     const v = $("dlg-video"); if (v) { v.pause(); v.src = ""; v.hidden = true; }
     const i = $("dlg-img"); i.hidden = false; i.src = b.dataset.img; i.alt = b.dataset.title;
     $("dlg-title").textContent = b.dataset.title;
+    $("dlg-reel-info").hidden = true;
     $("dlg-cap").textContent = b.dataset.caption; $("dlg-cap").hidden = !b.dataset.caption;
     $("dlg-link").href = b.dataset.link || "#"; $("dlg-link").hidden = !b.dataset.link; $("dlg").showModal();
   }
@@ -1741,12 +1752,21 @@
     const i = $("dlg-img"); if (i) i.hidden = false;
     document.getElementById("dlg").close();
   }
-  function previewReel(video, cover, title) {
+  function previewReel(video, cover, title, style, track) {
     const dlg = document.getElementById("dlg");
     $("dlg-title").textContent = title || "Reel preview";
     $("dlg-img").hidden = true;
     $("dlg-cap").hidden = true;
     $("dlg-link").hidden = true;
+    // show style + music badges when available
+    const infoEl = $("dlg-reel-info");
+    if (style || track) {
+      $("dlg-style-badge").textContent = "Style: " + (REEL_STYLE_LABELS[style] || style || "—");
+      $("dlg-track-badge").textContent  = "Music: " + (REEL_TRACK_LABELS[track]  || track  || "—");
+      infoEl.hidden = false;
+    } else {
+      infoEl.hidden = true;
+    }
     const v = $("dlg-video");
     v.poster = "/cards/" + cover;
     v.src = "/cards/" + video;
@@ -1772,7 +1792,7 @@
           const makeBtn = card.querySelector(`button[onclick*="reelSet(${id}, true"]`);
           if (makeBtn) makeBtn.textContent = "Redo the Reel";
           const pBtn = card.querySelector(`[id="reel-preview-${id}"]`);
-          if (pBtn) { pBtn.hidden = false; pBtn.onclick = () => previewReel(d.video, d.cover, card.querySelector("h2")?.textContent || ""); }
+          if (pBtn) { pBtn.hidden = false; pBtn.onclick = () => previewReel(d.video, d.cover, card.querySelector("h2")?.textContent || "", d.style, d.track); }
         }
         toast("Reel ready — preview is playing below.", false);
       } else if (ok && !on) {
