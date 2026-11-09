@@ -796,6 +796,8 @@
               <label class="sr" for="rt-{{ p.id }}">Music</label><select id="rt-{{ p.id }}" style="max-width:13em">{% for k, l in reel_tracks %}<option value="{{ k }}" {{ 'selected' if reel.track == k }}>{{ l }}</option>{% endfor %}</select>
               <button class="btn ghost" type="button" onclick="reelSet({{ p.id }}, true, this)">{{ "Redo the Reel" if reel.video else "Make it a Reel" }}</button>
               {% if reel.video %}<button class="btn ghost" type="button" onclick="reelSet({{ p.id }}, false, this)">Post as a picture</button>{% endif %}
+              <button class="btn ghost" id="reel-preview-{{ p.id }}" type="button" {{ '' if reel.video else 'hidden' }}
+                onclick="previewReel('{{ reel.video }}','{{ reel.cover }}','{{ p.headline|e }}')">▶ Preview Reel</button>
             </div>
             <details style="margin-top:6px"><summary>Animated text: words to highlight, big number, stamp</summary>
               <div class="two" style="margin-top:8px">
@@ -851,6 +853,7 @@
             {% endif %}
             <div class="row" style="margin-top:12px">
               <button class="btn" type="button" onclick="reelApprove({{ p.id }}, this)">Approve &amp; post as Reel</button>
+              {% if reel.video %}<button class="btn ghost" type="button" onclick="previewReel('{{ reel.video }}','{{ reel.cover }}','{{ p.headline|e }}')">▶ Preview fullscreen</button>{% endif %}
               <button class="btn ghost" type="button" onclick="decide({{ p.id }}, 'reject', this)">Reject</button>
             </div>
             <div class="msg" id="reel-msg-{{ p.id }}" role="status" aria-live="polite"></div>
@@ -1416,8 +1419,10 @@
 <dialog id="dlg" aria-labelledby="dlg-title">
   <div class="bd">
     <div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><b id="dlg-title"></b>
-      <button class="btn ghost sm" type="button" onclick="document.getElementById('dlg').close()">Close</button></div>
+      <button class="btn ghost sm" type="button" onclick="closeDlg()">Close</button></div>
     <img id="dlg-img" alt="">
+    <video id="dlg-video" controls playsinline preload="metadata" hidden
+           style="width:100%;max-height:80vh;border-radius:12px;background:#000;display:block"></video>
     <pre id="dlg-cap" hidden></pre>
     <a id="dlg-link" href="#" target="_blank" rel="noopener" hidden>Open on Instagram</a>
   </div>
@@ -1657,11 +1662,13 @@
 
   /* ---- post preview */
   function openPost(b) {
-    $("dlg-title").textContent = b.dataset.title; $("dlg-img").src = b.dataset.img; $("dlg-img").alt = b.dataset.title;
+    const v = $("dlg-video"); if (v) { v.pause(); v.src = ""; v.hidden = true; }
+    const i = $("dlg-img"); i.hidden = false; i.src = b.dataset.img; i.alt = b.dataset.title;
+    $("dlg-title").textContent = b.dataset.title;
     $("dlg-cap").textContent = b.dataset.caption; $("dlg-cap").hidden = !b.dataset.caption;
     $("dlg-link").href = b.dataset.link || "#"; $("dlg-link").hidden = !b.dataset.link; $("dlg").showModal();
   }
-  $("dlg").addEventListener("click", (e) => { if (e.target === $("dlg")) $("dlg").close(); });
+  $("dlg").addEventListener("click", (e) => { if (e.target === $("dlg")) closeDlg(); });
 
   /* ---- a post that is already up: change its caption, post it again, or take it down */
   let mpPost = null;
@@ -1729,13 +1736,51 @@
     if (d.login && ["running", "need_code"].includes(d.login.state)) showLogin(d.login);
   }
   const REEL_KEYS = ["REELS_PER_WEEK", "REEL_SECONDS", "REEL_STYLE", "REEL_MUSIC", "REEL_CTA"];
+  function closeDlg() {
+    const v = $("dlg-video"); if (v) { v.pause(); v.src = ""; v.hidden = true; }
+    const i = $("dlg-img"); if (i) i.hidden = false;
+    document.getElementById("dlg").close();
+  }
+  function previewReel(video, cover, title) {
+    const dlg = document.getElementById("dlg");
+    $("dlg-title").textContent = title || "Reel preview";
+    $("dlg-img").hidden = true;
+    $("dlg-cap").hidden = true;
+    $("dlg-link").hidden = true;
+    const v = $("dlg-video");
+    v.poster = "/cards/" + cover;
+    v.src = "/cards/" + video;
+    v.hidden = false;
+    v.load();
+    dlg.showModal();
+  }
   async function reelSet(id, on, btn) {
     btn.disabled = true; const label = btn.textContent; btn.textContent = on ? "Making the Reel…" : "Working…";
     try {
       const [ok, d] = await api(`/api/posts/${id}/reel`, { on, style: $("rs-" + id).value, track: $("rt-" + id).value,
         highlight: $("rh-" + id) ? $("rh-" + id).value : undefined, number: $("rn-" + id) ? $("rn-" + id).value : undefined, badge: $("rb-" + id) ? $("rb-" + id).value : undefined });
-      toast(ok ? (on ? "The Reel is ready. Play it before approving." : "It will be posted as a picture.") : (d.reason || d.error || "That did not work."), !ok);
-      if (ok) setTimeout(() => location.reload(), 700);
+      if (ok && on && d.video) {
+        // swap the still image for an inline video preview — no page reload needed
+        const card = document.getElementById("post-" + id);
+        if (card) {
+          const imgDiv = card.querySelector("div:first-child");
+          if (imgDiv) {
+            imgDiv.innerHTML = `<video src="/cards/${d.video}" poster="/cards/${d.cover}" controls playsinline preload="metadata"
+              style="width:100%;max-height:70vh;border-radius:12px;background:#000" aria-label="Reel preview"></video>`;
+          }
+          // swap button labels
+          const makeBtn = card.querySelector(`button[onclick*="reelSet(${id}, true"]`);
+          if (makeBtn) makeBtn.textContent = "Redo the Reel";
+          const pBtn = card.querySelector(`[id="reel-preview-${id}"]`);
+          if (pBtn) { pBtn.hidden = false; pBtn.onclick = () => previewReel(d.video, d.cover, card.querySelector("h2")?.textContent || ""); }
+        }
+        toast("Reel ready — preview is playing below.", false);
+      } else if (ok && !on) {
+        toast("It will be posted as a picture.", false);
+        setTimeout(() => location.reload(), 700);
+      } else {
+        toast(d.reason || d.error || "That did not work.", true);
+      }
     } finally { btn.disabled = false; btn.textContent = label; }
   }
   async function reelSetR(id, btn) {
