@@ -201,7 +201,7 @@ def pending_count() -> int:
 def _insert_draft(story_id: int, headline: str, caption: str, image: Any, writer_name: str, flyer_id: str = "", meta: str = "") -> int:
     post_id = _save_draft(story_id, headline, caption, image, writer_name, flyer_id, meta)
     media, kind = Path(str(image)), "flyer" if flyer_id else "news"
-    if flyer_id and reel_wanted():  # animation is for the marketing flyers; news stays a picture
+    if reel_wanted():
         out = make_reel(post_id)
         if out["ok"]:
             media, kind = settings.CARDS_DIR / out["video"], f"animated {kind}"

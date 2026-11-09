@@ -165,6 +165,16 @@ def draft_ready(headline: str, kind: str, image: Path | None, *, wait: bool = Fa
     return job
 
 
+def reel_queued(headline: str, image: Path | None, post_id: int = 0) -> None:
+    """Tell the editor a Reel is ready to approve (fires in the background)."""
+    if not channels():
+        return
+    where = link()
+    text = (f"Reel ready for approval: {headline}\n\n"
+            + (f"Review at: {where}" if where else "Open the dashboard, Reels, to review it."))
+    threading.Thread(target=send, args=("CloudTrio: a Reel is waiting for approval", text, image, post_id), daemon=True).start()
+
+
 def last_error() -> str:
     return db.kv_get(ERROR_KEY) or ""
 

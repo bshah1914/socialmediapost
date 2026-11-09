@@ -380,6 +380,7 @@ def create_app() -> Flask:
             "notify": notify.channels(),
             "notify_error": notify.last_error(),
             "pending": pipeline.pending_count(),
+            "reels_pending": int(db.rows("SELECT COUNT(*) AS n FROM posts WHERE status IN ('pending','scheduled') AND brand_id = ? AND meta LIKE '%\"reel\": {%'", settings.BRAND_ID)[0]["n"]),
             "linkedin": "live" if linkedin.configured() and settings.IG_DELIVERY == "instagram" else "dry run" if settings.LINKEDIN_ENABLED else "off",
             "last_cycle": json.loads(last) if last else None,
             "last_error": db.kv_get(pipeline.LAST_ERROR_KEY),
@@ -438,6 +439,11 @@ def create_app() -> Flask:
                                 highlight=[str(w) for w in words] if isinstance(words, list) else None,
                                 number=str(body["number"]) if isinstance(body.get("number"), str) else None,
                                 badge=str(body["badge"]) if isinstance(body.get("badge"), str) else None)  # fmt: skip
+        if out.get("ok") and body.get("on", True):
+            found = db.rows("SELECT headline, image_path FROM posts WHERE id = ?", post_id)
+            if found:
+                img = settings.CARDS_DIR / Path(str(found[0]["image_path"]).replace("\\", "/")).name
+                notify.reel_queued(found[0]["headline"], img if img.exists() else None, post_id)
         return jsonify(out), (200 if out["ok"] else 409)
 
     @app.get("/api/reels/track/<name>")
@@ -474,9 +480,13 @@ def create_app() -> Flask:
                         "WHERE p.status NOT IN ('pending', 'scheduled') AND p.brand_id = ? ORDER BY p.created_at DESC LIMIT 30", settings.BRAND_ID)  # fmt: skip
         pending = db.rows("SELECT p.*, s.url, s.category FROM posts p LEFT JOIN stories s ON s.id = p.story_id "
                           "WHERE p.status IN ('pending', 'scheduled') AND p.brand_id = ? ORDER BY p.id", settings.BRAND_ID)  # fmt: skip
+        pending_meta = {p["id"]: pipeline.draft_meta(p) for p in pending}
+        pending_still = [p for p in pending if not (pending_meta.get(p["id"]) or {}).get("reel", {}).get("video")]
+        pending_reel  = [p for p in pending if     (pending_meta.get(p["id"]) or {}).get("reel", {}).get("video")]
         return render_template("dashboard.html", brand_list=[b for b in brands.listing() if b["enabled"]], brand_now=g.brand["id"], status=status(), stories=stories, posts=posts, pending=pending,
+                               pending_still=pending_still, pending_reel=pending_reel,
                                insights=insights(), flyer_layouts=flyers.LAYOUTS, reels_ok=motion.available(), reel_styles=motion.STYLES, reel_tracks=motion.TRACKS,
-                               pending_meta={p["id"]: pipeline.draft_meta(p) for p in pending},
+                               pending_meta=pending_meta,
                                pending_notes={p["id"]: db.rows('SELECT "user" AS user, text, at FROM notes WHERE post_id = ? ORDER BY id', p["id"]) for p in pending},
                                news_tags=[(k, {"AI": "AI", "DEVOPS": "DevOps"}.get(v, v.title())) for k, v in card.LABEL.items()], flyer_themes=flyers.theme_defaults(),
                                flyer_palettes=flyers.PALETTES,

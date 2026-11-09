@@ -36,11 +36,22 @@ logger = logging.getLogger(__name__)
 W: Final = 1080
 H: Final = 1920
 FPS: Final = 30
-SIMPLE: Final = (("slide", "Simple: slide in"), ("zoom", "Simple: zoom"), ("reveal", "Simple: reveal"), ("countup", "Simple: count up"))
+SIMPLE: Final = (
+    ("slide", "Simple: slide in"), ("zoom", "Simple: zoom"),
+    ("reveal", "Simple: reveal"), ("countup", "Simple: count up"),
+    ("drift", "Simple: drift in"), ("split", "Simple: split reveal"),
+    ("focus", "Simple: focus in"), ("float", "Simple: float"),
+)
 SIMPLE_IDS: Final = frozenset(k for k, _ in SIMPLE)
 #: The animated-text presets (technews.kinetic) first, then the picture simply moving.
-STYLES: Final = (("bold", "Bold (animated text)"), ("corporate", "Corporate (animated text)"), ("tech", "Tech (animated text)"),
-                 ("offer", "Offer (animated text)"), *SIMPLE)  # fmt: skip
+STYLES: Final = (
+    ("bold", "Bold (animated text)"), ("corporate", "Corporate (animated text)"),
+    ("tech", "Tech (animated text)"), ("offer", "Offer (animated text)"),
+    ("minimal", "Minimal (animated text)"), ("neon", "Neon (animated text)"),
+    ("magazine", "Magazine (animated text)"), ("impact", "Impact (animated text)"),
+    ("story", "Story (animated text)"), ("data", "Data (animated text)"),
+    *SIMPLE,
+)
 STYLE_IDS: Final = frozenset(k for k, _ in STYLES)
 TRACKS: Final = (("upbeat", "Upbeat (built in)"), ("calm", "Calm (built in)"), ("custom", "Your uploaded track"), ("none", "No music"))
 TRACK_IDS: Final = frozenset(k for k, _ in TRACKS)
@@ -273,6 +284,59 @@ def frames(image: Path, *, style: str = "slide", seconds: float = 12, headline: 
             elif style == "zoom":
                 grow = 1.18 - 0.18 * _between(ct, 0.0, 1.6)
                 img = _faded(card_img, _between(ct, 0.0, 0.6))
+            elif style == "drift":
+                # slides in from the right with a slight tilt that straightens on landing
+                progress = _between(ct, 0.0, 1.0)
+                x = int((W + 150) * (1 - progress) + (W - card_img.width) // 2 * progress)
+                angle = 6.0 * (1 - _ease(min(1.0, ct / 1.0)))
+                if angle > 0.1:
+                    img = card_img.rotate(angle, expand=True, resample=Image.BICUBIC)
+                    x = x - (img.width - card_img.width) // 2
+                    y = card_top - (img.height - card_img.height) // 2
+                img = _faded(img, _between(ct, 0.0, 0.5))
+                grow = 1 + 0.02 * max(0.0, (ct - 1.0) / max(1.0, seconds - intro - 1.0))
+                if grow != 1:
+                    scaled = img.resize((int(img.width * grow), int(img.height * grow)), Image.BILINEAR)
+                    x, y = x - (scaled.width - img.width) // 2, y - (scaled.height - img.height) // 2
+                    img = scaled
+                frame.alpha_composite(img, (x, y))
+                continue  # skip the generic grow/composite below
+            elif style == "split":
+                # background tears apart, card is revealed behind it
+                grow = 1.0
+                if ct < 1.2:
+                    split_progress = _ease(ct / 1.2)
+                    offset = int(split_progress * 420)
+                    split_frame = Image.new("RGB", (W, H), (6, 14, 30))
+                    top_half = bg.crop((0, 0, W, H // 2))
+                    bot_half = bg.crop((0, H // 2, W, H))
+                    split_frame.paste(top_half, (0, -offset))
+                    split_frame.paste(bot_half, (0, H // 2 + offset))
+                    card_alpha = _between(ct, 0.4, 1.0)
+                    split_frame = split_frame.convert("RGBA")
+                    split_frame.alpha_composite(_faded(card_img, card_alpha), (x, y))
+                    frame.alpha_composite(split_frame, (0, 0))
+                else:
+                    frame.alpha_composite(card_img, (x, y))
+                continue
+            elif style == "focus":
+                # starts blurred and sharpens into focus
+                blur_r = max(0, int(18 * (1 - _between(ct, 0.0, 1.8))))
+                scale = 1.08 - 0.08 * _between(ct, 0.0, 1.8)
+                blurred = card_img.filter(ImageFilter.GaussianBlur(blur_r)) if blur_r > 0 else card_img
+                blurred = _faded(blurred, _between(ct, 0.0, 0.5))
+                scaled_w, scaled_h = int(card_img.width * scale), int(card_img.height * scale)
+                if abs(scale - 1) > 0.005:
+                    blurred = blurred.resize((scaled_w, scaled_h), Image.BILINEAR)
+                sx = (W - blurred.width) // 2
+                sy = card_top - (blurred.height - card_img.height) // 2
+                frame.alpha_composite(blurred, (sx, sy))
+                continue
+            elif style == "float":
+                # card bobs gently, background drifts in opposite direction
+                bob_y = int(14 * math.sin(ct * math.pi * 0.55))
+                frame.alpha_composite(card_img, (x, y + bob_y))
+                continue
             else:  # reveal
                 grow = 1.0
                 shown_h = int(card_img.height * _between(ct, 0.2, 1.8))

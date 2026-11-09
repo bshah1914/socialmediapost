@@ -35,7 +35,11 @@ H: Final = 1920
 FPS: Final = 30
 MARGIN: Final = 84
 SAFE_BOTTOM: Final = 1480  # Instagram lays the caption and buttons over the bottom of a Reel
-PRESETS: Final = (("bold", "Bold"), ("corporate", "Corporate"), ("tech", "Tech"), ("offer", "Offer"))
+PRESETS: Final = (
+    ("bold", "Bold"), ("corporate", "Corporate"), ("tech", "Tech"), ("offer", "Offer"),
+    ("minimal", "Minimal"), ("neon", "Neon"), ("magazine", "Magazine"),
+    ("impact", "Impact"), ("story", "Story"), ("data", "Data"),
+)
 PRESET_IDS: Final = frozenset(k for k, _ in PRESETS)
 TRACK_BPM: Final = {"upbeat": 112, "calm": 60}
 SELLING: Final = frozenset("free save saving savings cut cuts credits credit discount discounts partner zero no lower cheaper faster "
@@ -47,19 +51,28 @@ RGB = tuple[int, int, int]
 
 @dataclass(frozen=True, slots=True)
 class Preset:
-    words: str  # punch | rise | type
-    wipe: bool  # an accent band between scenes (else the scene slides up and fades)
+    words: str   # punch | rise | type | slam
+    wipe: bool   # an accent band between scenes (else the scene slides up and fades)
     pulse: bool  # the background brightens a little on every beat
     grid: bool
     stamp: bool  # a stamp for the offer scene when there is no number
     sweep: bool  # a band of light passes over the hook
+    glow: bool = False      # neon glow halo blurred behind each word
+    big_hook: bool = False  # oversized headline font for the hook scene
+    slow: bool = False      # word timing multiplied by 1.6 (story pace)
 
 
 STYLE: Final = {
-    "bold": Preset("punch", True, True, False, False, True),
-    "corporate": Preset("rise", False, False, False, False, False),
-    "tech": Preset("type", True, False, True, False, False),
-    "offer": Preset("punch", False, True, False, True, True),
+    "bold":      Preset("punch", True,  True,  False, False, True),
+    "corporate": Preset("rise",  False, False, False, False, False),
+    "tech":      Preset("type",  True,  False, True,  False, False),
+    "offer":     Preset("punch", False, True,  False, True,  True),
+    "minimal":   Preset("rise",  False, False, False, False, False),
+    "neon":      Preset("punch", True,  True,  True,  False, True,  glow=True),
+    "magazine":  Preset("punch", False, False, False, False, True,  big_hook=True),
+    "impact":    Preset("slam",  True,  True,  False, False, False),
+    "story":     Preset("rise",  False, False, False, False, False, slow=True),
+    "data":      Preset("type",  False, False, True,  True,  False),
 }
 
 
@@ -271,10 +284,12 @@ class Film:
     def _layout(self) -> None:
         f = self.flyer
         width = W - 2 * MARGIN
-        for size in (128, 116, 104, 94, 84, 76):
+        sizes = (160, 148, 136, 128, 116, 104, 94, 84, 76) if self.p.big_hook else (128, 116, 104, 94, 84, 76)
+        max_lines = 3 if self.p.big_hook else 4
+        for size in sizes:
             hf = font(size, mono=False)
             lines = wrap(f.headline, hf, width)
-            if len(lines) <= 4:
+            if len(lines) <= max_lines:
                 break
         self.hfont, self.hsize = hf, size
         self.words: list[dict[str, Any]] = []
@@ -300,6 +315,9 @@ class Film:
             self.word_at.append(at)
             at += 0.035 * len(w["text"]) + 0.05 if self.p.words == "type" else 0.11
         self.words_end = at + 0.4
+        if self.p.slow:
+            self.word_at = [v * 1.6 for v in self.word_at]
+            self.words_end *= 1.6
         kf = font(40, mono=self.mono)
         k = sprite(f.kicker.upper(), kf, self.on_accent)
         self.chip = rounded((k.width + 64, k.height + 24), self.accent, 34)
@@ -372,7 +390,11 @@ class Film:
         k = span(t, start, 0.45)
         if k <= 0:
             return
-        if self.p.words == "punch":
+        if self.p.words == "slam":
+            # word slams in full-screen large then shrinks to its position
+            scale = max(1.0, 6.0 - 5.0 * ease_back(k))
+            put(fr, w["img"], w["x"], w["y"] - lift, alpha=a * ease(k * 3), scale=scale)
+        elif self.p.words == "punch":
             put(fr, w["img"], w["x"], w["y"] - lift, alpha=a * ease(k * 2), scale=1 + 0.45 * (1 - ease_back(k)))
         else:  # rise
             put(fr, w["img"], w["x"], w["y"] - lift + 50 * (1 - ease(k)), alpha=a * ease(k))
@@ -385,6 +407,11 @@ class Film:
         words_end = self.words_end
         marker = span(lt, words_end, 0.5)
         d_ = ImageDraw.Draw(fr)
+        if self.p.glow:  # neon: blurred glow halo behind each visible word
+            for w in self.words:
+                if span(lt, self.word_at[w["n"]], 0.45) > 0:
+                    glow_img = w["img"].filter(ImageFilter.GaussianBlur(22))
+                    put(fr, faded(glow_img, 0.5 * (1 - out)), w["x"] - 11, w["y"] - lift - 11)
         lit = [w for w in self.words if w["on"]]
         for w in lit:  # the marker goes under the words, so it is drawn first
             if marker > 0:
@@ -509,10 +536,12 @@ class Film:
 
 
 def auto_preset(flyer: Any) -> str:
-    """A preset to suit the flyer: numbers and credits sell as an offer, cloud tooling reads as tech, else bold."""
+    """A preset to suit the flyer: numbers/credits → offer, AI/LLM → neon, cloud tooling → tech, else bold."""
     text = " ".join([flyer.kicker, flyer.headline, *flyer.points]).lower()
     if figure(flyer.headline, *flyer.points) or re.search(r"\b(credits?|discount|free|offer)\b", text):
         return "offer"
+    if re.search(r"\b(ai|llm|gpt|claude|gemini|openai|anthropic|neural|model)\b", text):
+        return "neon"
     if re.search(r"\b(devops|kubernetes|terraform|ci/cd|pipeline|automation|monitoring|security)\b", text):
         return "tech"
     return "bold"

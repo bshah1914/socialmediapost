@@ -596,7 +596,8 @@
   'calendar': '<path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/>',
   'flyers': '<path d="M5 3h14v18H5zM8 7h8M8 11h8M8 15h5"/>',
   'sources': '<path d="M5 5a14 14 0 0114 14M5 11a8 8 0 018 8"/><circle cx="6" cy="18" r="1.5"/>',
-  'settings': '<path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8 4l2-1-2-4-2 .5a7 7 0 00-2-1L15 4H9l-1 2.5a7 7 0 00-2 1L4 7l-2 4 2 1a7 7 0 000 2l-2 1 2 4 2-.5a7 7 0 002 1L9 22h6l1-2.5a7 7 0 002-1l2 .5 2-4-2-1a7 7 0 000-2z"/>'
+  'settings': '<path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8 4l2-1-2-4-2 .5a7 7 0 00-2-1L15 4H9l-1 2.5a7 7 0 00-2 1L4 7l-2 4 2 1a7 7 0 000 2l-2 1 2 4 2-.5a7 7 0 002 1L9 22h6l1-2.5a7 7 0 002-1l2 .5 2-4-2-1a7 7 0 000-2z"/>',
+  'reels': '<path d="M15 10l-4-2.5v5l4-2.5z"/><rect x="2" y="6" width="20" height="12" rx="3"/>'
 } %}
 <div class="app">
   <aside aria-label="Sidebar">
@@ -607,9 +608,9 @@
     {% if brand_list|length > 1 %}<label class="sr" for="brand-sw">Brand</label>
     <select id="brand-sw" class="brand-sw" onchange="switchBrand(this.value)">{% for b in brand_list %}<option value="{{ b.id }}" {{ 'selected' if b.id == brand_now }}>{{ b.name }}</option>{% endfor %}</select>{% endif %}
     <nav aria-label="Dashboard sections" id="nav">
-      {% for key, label in [('overview','Overview'),('approvals','Approvals'),('posts','Posts'),('analytics','Analytics'),('stories','Stories'),('create','Create'),('agents','Agents'),('calendar','Calendar'),('flyers','Flyers'),('sources','Sources'),('settings','Settings')] %}
+      {% for key, label in [('overview','Overview'),('approvals','Approvals'),('reels','Reels'),('posts','Posts'),('analytics','Analytics'),('stories','Stories'),('create','Create'),('agents','Agents'),('calendar','Calendar'),('flyers','Flyers'),('sources','Sources'),('settings','Settings')] %}
       {% if key == 'create' %}<span class="nav-label">Plan and manage</span>{% endif %}
-      <a href="#{{ key }}" data-view="{{ key }}" class="{{ 'sec' if key in ('analytics','create','agents','calendar','flyers','sources','settings') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{{ icons[key]|safe }}</svg><span class="lbl">{{ label }}</span>{% if key == 'approvals' and status.pending %}<span class="badge" aria-label="{{ status.pending }} waiting">{{ status.pending }}</span>{% endif %}</a>
+      <a href="#{{ key }}" data-view="{{ key }}" class="{{ 'sec' if key in ('analytics','create','agents','calendar','flyers','sources','settings') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{{ icons[key]|safe }}</svg><span class="lbl">{{ label }}</span>{% if key == 'approvals' and status.pending %}<span class="badge" aria-label="{{ status.pending }} waiting">{{ status.pending }}</span>{% endif %}{% if key == 'reels' and status.reels_pending %}<span class="badge" aria-label="{{ status.reels_pending }} reels waiting">{{ status.reels_pending }}</span>{% endif %}</a>
       {% endfor %}
       <button type="button" class="more-btn" id="more-btn" aria-expanded="false" aria-controls="more" onclick="toggleMore()"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg><span class="lbl">More</span></button>
     </nav>
@@ -758,9 +759,9 @@
     <!-- ============================================================ APPROVALS -->
     <section id="approvals" data-view="approvals" hidden aria-labelledby="view-title">
       {% if status.approval == "off" %}<div class="card" style="margin-bottom:16px">Approval is <b>off</b>, so posts go out automatically. Turn it on under Settings, Approval.</div>{% endif %}
-      {% if pending %}
+      {% if pending_still %}
       <div class="queue">
-        {% for p in pending %}
+        {% for p in pending_still %}
         {% set img = p.image_path.replace('\\', '/').split('/')[-1] %}
         {% set reel = (pending_meta.get(p.id) or {}).get('reel') or {} %}
         <article class="card review" id="post-{{ p.id }}">
@@ -790,7 +791,7 @@
               <button class="btn ghost" type="button" data-flyer="{{ p.flyer }}" data-cat="{{ p.category or '' }}" onclick="editDraft({{ p.id }}, this)">Edit design</button>
               <button class="btn ghost" type="button" onclick="decide({{ p.id }}, 'reject', this)">Reject</button>
             </div>
-            {% if reels_ok and p.flyer %}<div class="row" style="margin-top:8px">
+            {% if reels_ok %}<div class="row" style="margin-top:8px">
               <label class="sr" for="rs-{{ p.id }}">Movement</label><select id="rs-{{ p.id }}" style="max-width:11em">{% for k, l in reel_styles %}<option value="{{ k }}" {{ 'selected' if reel.style == k }}>{{ l }}</option>{% endfor %}</select>
               <label class="sr" for="rt-{{ p.id }}">Music</label><select id="rt-{{ p.id }}" style="max-width:13em">{% for k, l in reel_tracks %}<option value="{{ k }}" {{ 'selected' if reel.track == k }}>{{ l }}</option>{% endfor %}</select>
               <button class="btn ghost" type="button" onclick="reelSet({{ p.id }}, true, this)">{{ "Redo the Reel" if reel.video else "Make it a Reel" }}</button>
@@ -808,7 +809,61 @@
         </article>
         {% endfor %}
       </div>
-      {% else %}<div class="card empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg><b>All caught up</b><br>New posts appear here as the newsroom writes them.</div>{% endif %}
+      {% else %}<div class="card empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg><b>All caught up</b><br>New posts appear here as the newsroom writes them.{% if pending_reel %} <a href="#reels">{{ pending_reel|length }} Reel{{ "" if pending_reel|length == 1 else "s" }} waiting in Reels.</a>{% endif %}</div>{% endif %}
+    </section>
+
+    <!-- ============================================================ REELS -->
+    <section id="reels" data-view="reels" hidden aria-labelledby="view-title">
+      {% if not reels_ok %}
+      <div class="card">Animated Reels need ffmpeg on the server. It is not installed here.</div>
+      {% elif pending_reel %}
+      <div class="queue">
+        {% for p in pending_reel %}
+        {% set img = p.image_path.replace('\\', '/').split('/')[-1] %}
+        {% set reel = (pending_meta.get(p.id) or {}).get('reel') or {} %}
+        <article class="card review" id="reel-{{ p.id }}">
+          <div>{% if reel.video %}<video src="/cards/{{ reel.video }}" poster="/cards/{{ reel.cover }}" controls playsinline preload="metadata" style="width:100%;max-height:70vh;border-radius:12px;background:#000" aria-label="Reel preview: {{ p.headline }}"></video>
+          {% else %}<img src="/cards/{{ img }}" alt="{{ p.headline }}">{% endif %}</div>
+          <div>
+            <h2>{{ p.headline }}</h2>
+            <div class="dest">
+              <span class="pill {{ 'flyer' if p.flyer else 'news' }}">{{ "flyer" if p.flyer else "news" }}</span>
+              <span class="pill low">Instagram Reel</span>
+              {% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener">Source story</a>{% endif %}
+            </div>
+            <label for="rcap-{{ p.id }}">Caption</label>
+            <textarea id="rcap-{{ p.id }}">{{ p.caption }}</textarea>
+            <div class="row" style="margin-top:8px">
+              <label class="sr" for="rrs-{{ p.id }}">Style</label>
+              <select id="rrs-{{ p.id }}" style="max-width:14em">{% for k, l in reel_styles %}<option value="{{ k }}" {{ 'selected' if reel.style == k }}>{{ l }}</option>{% endfor %}</select>
+              <label class="sr" for="rrt-{{ p.id }}">Music</label>
+              <select id="rrt-{{ p.id }}" style="max-width:13em">{% for k, l in reel_tracks %}<option value="{{ k }}" {{ 'selected' if reel.track == k }}>{{ l }}</option>{% endfor %}</select>
+              <button class="btn ghost" type="button" onclick="reelSetR({{ p.id }}, this)">Redo Reel</button>
+            </div>
+            {% if p.flyer %}
+            <details style="margin-top:6px"><summary>Animated text options</summary>
+              <div class="two" style="margin-top:8px">
+                <div><label for="rrh-{{ p.id }}">Words to highlight (comma separated)</label><input id="rrh-{{ p.id }}" type="text" maxlength="120" value="{{ (reel.highlight or [])|join(', ') }}"></div>
+                <div><label for="rrn-{{ p.id }}">Big number to count up</label><input id="rrn-{{ p.id }}" type="text" maxlength="30" value="{{ reel.number or '' }}"></div>
+                <div><label for="rrb-{{ p.id }}">Stamp text</label><input id="rrb-{{ p.id }}" type="text" maxlength="40" value="{{ reel.badge or '' }}"></div>
+              </div>
+            </details>
+            {% endif %}
+            <div class="row" style="margin-top:12px">
+              <button class="btn" type="button" onclick="reelApprove({{ p.id }}, this)">Approve &amp; post as Reel</button>
+              <button class="btn ghost" type="button" onclick="decide({{ p.id }}, 'reject', this)">Reject</button>
+            </div>
+            <div class="msg" id="reel-msg-{{ p.id }}" role="status" aria-live="polite"></div>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="card empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 10l-4-2.5v5l4-2.5z"/><rect x="2" y="6" width="20" height="12" rx="3"/></svg>
+        <b>No Reels waiting</b><br>Go to Approvals and click "Make it a Reel" on any post.
+      </div>
+      {% endif %}
     </section>
 
     <!-- ============================================================ CREATE -->
@@ -1501,7 +1556,7 @@
   const THEMES = {{ flyer_themes|tojson }}, PALETTES = {{ flyer_palettes|tojson }}, PENDING_META = {{ pending_meta|tojson }};
   const NEWSROOM_KEYS = ["BLOCKED_WORDS","WATCHDOG_MINUTES","SCAN_INTERVAL_MINUTES","SCAN_MAX_AGE_HOURS","SCAN_MIN_SCORE","REVIEW_MIN_SCORE","FLYER_AFTER_NEWS","APPROVAL_QUEUE_MAX","TIMEZONE","FLYERS_ENABLED"];
   const NOTIFY_KEYS = ["PUBLIC_URL","NOTIFY_EMAIL_TO","SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","WHATSAPP_PROVIDER","WHATSAPP_TO","WHATSAPP_APIKEY","TWILIO_SID","TWILIO_WHATSAPP_FROM","TELEGRAM_BOT_TOKEN","TELEGRAM_CHAT_ID","NOTIFY_WEBHOOK_URL"];
-  const PENDING = {{ status.pending }}, CHANNELS = {{ status.notify|tojson }};
+  const PENDING = {{ status.pending }}, REELS_PENDING = {{ status.reels_pending }}, CHANNELS = {{ status.notify|tojson }};
   const OFFSITE_KEYS = ["BACKUP_S3_ENDPOINT","BACKUP_S3_BUCKET","BACKUP_S3_ID","BACKUP_S3_SECRET","BACKUP_COPY_DIR"];
   const IG_KEYS = ["IG_USERNAME","IG_PASSWORD","IG_HANDLE","IG_DELIVERY","POSTS_PER_DAY","MIN_POST_GAP_MINUTES"];
   const $ = (id) => document.getElementById(id);
@@ -1526,6 +1581,7 @@
   const TITLES = {
     overview: ["Overview", "Cloud and DevOps news first, then the rest of tech. Marketing flyers between the news."],
     approvals: ["Approvals", "Review each post. Approve to send it to Instagram (flyers also to LinkedIn), or reject it."],
+    reels: ["Reels", "Animated posts waiting for your approval. Pick a style and music, then approve to post as a Reel."],
     posts: ["Posts", "Everything published to the page, news cards and flyers. Select one for the caption."],
     analytics: ["Analytics", "What the audience does with the posts: followers, reach, saves, shares and plays, read back from Instagram."],
     stories: ["Stories", "What the scanner found, how the reviewer scored it, and what happened next."],
@@ -1681,6 +1737,28 @@
       toast(ok ? (on ? "The Reel is ready. Play it before approving." : "It will be posted as a picture.") : (d.reason || d.error || "That did not work."), !ok);
       if (ok) setTimeout(() => location.reload(), 700);
     } finally { btn.disabled = false; btn.textContent = label; }
+  }
+  async function reelSetR(id, btn) {
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "Making the Reel…";
+    try {
+      const style = $("rrs-" + id) ? $("rrs-" + id).value : "auto";
+      const track = $("rrt-" + id) ? $("rrt-" + id).value : "upbeat";
+      const highlight = $("rrh-" + id) ? $("rrh-" + id).value : "";
+      const number   = $("rrn-" + id) ? $("rrn-" + id).value : "";
+      const badge    = $("rrb-" + id) ? $("rrb-" + id).value : "";
+      const [ok, d] = await api(`/api/posts/${id}/reel`, { on: true, style, track, highlight, number, badge });
+      toast(ok ? "Reel redone. Reload to preview." : (d.reason || d.error || "That did not work."), !ok);
+      if (ok) setTimeout(() => location.reload(), 800);
+    } finally { btn.disabled = false; btn.textContent = label; }
+  }
+  async function reelApprove(id, btn) {
+    btn.disabled = true;
+    const caption = $("rcap-" + id) ? $("rcap-" + id).value : undefined;
+    const [ok, d] = await api(`/api/posts/${id}/approve`, caption !== undefined ? { caption } : {});
+    const msg = $("reel-msg-" + id);
+    if (msg) { msg.className = "msg " + (ok ? "ok" : "err"); msg.textContent = ok ? "Posted as a Reel ✓" : (d.reason || d.error || "Could not post"); }
+    if (ok) { const art = document.getElementById("reel-" + id); if (art) art.style.opacity = ".4"; }
+    else btn.disabled = false;
   }
   async function uploadTrack(btn) {
     const file = $("reel-file").files[0]; if (!file) { say("rf-msg", "Choose an audio file first.", false); return; }
