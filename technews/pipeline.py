@@ -239,45 +239,45 @@ def _draft_flyer(post: dict[str, Any]) -> flyers.Flyer | None:
     return flyers.get(post["flyer"])
 
 
-def make_reel(post_id: int, *, style: str = "", track: str = "", highlight: list[str] | None = None, number: str | None = None,
-              badge: str | None = None) -> dict[str, Any]:  # fmt: skip
-    """Turn a waiting flyer into a Reel, or redo its Reel. A preset (bold, corporate, tech, offer) animates the flyer's
-    own words; a simple movement moves the finished picture. ``highlight``, ``number`` and ``badge`` steer the words."""
+def make_reel(post_id: int, *, style: str = "", track: str = "", frame: str = "",
+              highlight: list[str] | None = None, number: str | None = None, badge: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """Turn a waiting post into a Reel, or redo its Reel."""
     found = db.rows("SELECT * FROM posts WHERE id = ? AND status = 'pending'", post_id)
     if not found:
         return {"ok": False, "reason": "that post is not waiting for approval"}
     post = found[0]
-    if not post["flyer"]:
-        return {"ok": False, "reason": "Only a marketing flyer can be made into a Reel."}
     meta = draft_meta(post)
     before = meta.get("reel") if isinstance(meta.get("reel"), dict) else {}
     wanted = settings.REEL_STYLE if settings.REEL_STYLE in motion.STYLE_IDS else ""
     style = style if style in motion.STYLE_IDS else (before.get("style") or wanted)
     track = track if track in motion.TRACK_IDS else (before.get("track") or settings.REEL_MUSIC)
+    frame = frame if frame in motion.FRAME_IDS else (before.get("frame") or "default")
     highlight = [h.strip() for h in (highlight if highlight is not None else before.get("highlight") or []) if str(h).strip()][:6]
     number = (number if number is not None else before.get("number") or "").strip()[:30]
     badge = (badge if badge is not None else before.get("badge") or "").strip()[:40]
     out = settings.CARDS_DIR / f"reel-{post_id}-{int(time.time() * 1000)}.mp4"
     try:
-        if style in motion.SIMPLE_IDS:
+        if style in motion.SIMPLE_IDS or not post["flyer"]:
             image = settings.CARDS_DIR / Path(str(post["image_path"]).replace("\\", "/")).name
             text = " ".join([post["headline"], *((meta.get("flyer") or {}).get("points") or [])])
-            video, cover = motion.render(image, out, style=style, track=track, headline=text if style == "countup" else post["headline"])
+            video, cover = motion.render(image, out, style=style or "slide", track=track, frame=frame,
+                                         headline=text if style == "countup" else post["headline"])
         else:
             flyer = _draft_flyer(post)
             if flyer is None:
                 return {"ok": False, "reason": "The flyer of this draft no longer exists."}
-            video, cover, style = motion.render_flyer(flyer, out, preset=style or "auto", track=track, highlight=highlight, number=number, badge=badge)
+            video, cover, style = motion.render_flyer(flyer, out, preset=style or "auto", track=track, frame=frame,
+                                                       highlight=highlight, number=number, badge=badge)
     except (motion.MotionError, OSError) as exc:
         logger.warning("pipeline.reel_failed post=%s error=%s", post_id, str(exc)[:200])
         return {"ok": False, "reason": str(exc)[:300]}
-    meta["reel"] = {"style": style, "track": track, "video": video.name, "cover": cover.name, "highlight": highlight, "number": number, "badge": badge}
+    meta["reel"] = {"style": style, "track": track, "frame": frame, "video": video.name, "cover": cover.name,
+                    "highlight": highlight, "number": number, "badge": badge}
     db.execute("UPDATE posts SET meta = ? WHERE id = ?", json.dumps(meta), post_id)
     return {"ok": True, "post_id": post_id, **meta["reel"]}
 
 
 def drop_reel(post_id: int) -> dict[str, Any]:
-    """Post a waiting draft as a still picture again."""
     found = db.rows("SELECT * FROM posts WHERE id = ? AND status = 'pending'", post_id)
     if not found:
         return {"ok": False, "reason": "that post is not waiting for approval"}
@@ -287,10 +287,10 @@ def drop_reel(post_id: int) -> dict[str, Any]:
     return {"ok": True, "post_id": post_id}
 
 
-def set_reel(post_id: int, on: bool, *, style: str = "", track: str = "", highlight: list[str] | None = None,
-             number: str | None = None, badge: str | None = None) -> dict[str, Any]:  # fmt: skip
+def set_reel(post_id: int, on: bool, *, style: str = "", track: str = "", frame: str = "",
+             highlight: list[str] | None = None, number: str | None = None, badge: str | None = None) -> dict[str, Any]:  # fmt: skip
     with _as_post_brand(post_id):
-        return make_reel(post_id, style=style, track=track, highlight=highlight, number=number, badge=badge) if on else drop_reel(post_id)
+        return make_reel(post_id, style=style, track=track, frame=frame, highlight=highlight, number=number, badge=badge) if on else drop_reel(post_id)
 
 
 def _publish_ig(post: dict[str, Any], image: Path, text: str) -> dict[str, str]:

@@ -36,6 +36,32 @@ logger = logging.getLogger(__name__)
 W: Final = 1080
 H: Final = 1920
 FPS: Final = 30
+FRAMES: Final = (
+    # --- creative ---
+    ("default",   "Classic blur"),
+    ("glow",      "Accent glow"),
+    ("gradient",  "Gradient"),
+    ("neon",      "Neon border"),
+    ("film",      "Cinematic"),
+    ("vignette",  "Vignette"),
+    ("glass",     "Frosted glass"),
+    ("split",     "Split colour"),
+    ("aurora",    "Aurora"),
+    ("retro",     "Synthwave"),
+    ("dark",      "Pure dark"),
+    ("tech",      "Tech grid"),
+    ("cosmos",    "Cosmos"),
+    # --- corporate ---
+    ("corp_navy",  "Corporate navy"),
+    ("corp_slate", "Corporate slate"),
+    ("corp_white", "Corporate white"),
+    ("corp_exec",  "Corporate executive"),
+    ("corp_azure", "Corporate azure"),
+    ("corp_trust", "Corporate trust"),
+    ("corp_gold",  "Corporate gold"),
+)
+FRAME_IDS: Final = frozenset(k for k, _ in FRAMES)
+
 SIMPLE: Final = (
     ("slide", "Simple: slide in"), ("zoom", "Simple: zoom"),
     ("reveal", "Simple: reveal"), ("countup", "Simple: count up"),
@@ -207,6 +233,308 @@ def _background(img: Image.Image) -> Image.Image:
     return Image.blend(bg, Image.new("RGB", (W, H), (6, 14, 30)), 0.62)
 
 
+def _mix3(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    return (int(a[0] + (b[0] - a[0]) * t), int(a[1] + (b[1] - a[1]) * t), int(a[2] + (b[2] - a[2]) * t))
+
+
+def _solid_gradient(top: tuple, bot: tuple) -> Image.Image:
+    img = Image.new("RGB", (W, H))
+    d = ImageDraw.Draw(img)
+    for y in range(H):
+        d.line([(0, y), (W, y)], fill=_mix3(top, bot, y / H))
+    return img
+
+
+class _FrameRenderer:
+    """Builds the per-frame visual design: background, logo, decorative overlays.
+    20 designs — 13 creative + 7 corporate."""
+
+    def __init__(self, frame: str, src: Image.Image, accent: tuple[int, int, int]) -> None:
+        self.frame = frame if frame in FRAME_IDS else "default"
+        self.accent = accent
+        self.src = src
+        self._blurred = _background(src)
+        self.logo64 = _lockup(64)
+        self.mark = brand.mark(120).convert("RGBA")
+
+    # ------------------------------------------------------------------ backgrounds
+    def bg(self) -> Image.Image:
+        f, ac = self.frame, self.accent
+        dark, navy = (4, 8, 18), (8, 18, 42)
+
+        # ── creative ──
+        if f == "default":
+            return self._blurred.copy()
+
+        if f == "glow":
+            img = self._blurred.copy()
+            for r, a in ((700, 0.26), (450, 0.20), (260, 0.14)):
+                g = Image.radial_gradient("L").resize((r * 2, r * 2), Image.BICUBIC)
+                mask = g.point(lambda v: int(255 * a * max(0.0, 1 - v / 181) ** 2.2))
+                img.paste(Image.new("RGB", (r * 2, r * 2), ac), (W // 2 - r, H // 2 - r), mask)
+            return img
+
+        if f == "gradient":
+            top_c = _mix3(ac, (0, 0, 0), 0.52)
+            return _solid_gradient(top_c, (6, 6, 16))
+
+        if f == "neon":
+            img = Image.new("RGB", (W, H), (2, 2, 10))
+            g = Image.radial_gradient("L").resize((W * 2, H * 2), Image.BICUBIC)
+            mask = g.point(lambda v: int(85 * max(0.0, 1 - v / 181) ** 2.2))
+            img.paste(Image.new("RGB", (W * 2, H * 2), ac), (-W // 2, -H // 2), mask)
+            return img
+
+        if f == "film":
+            img = self._blurred.copy()
+            ImageDraw.Draw(img).rectangle([0, 0, W, 130], fill=(0, 0, 0))
+            ImageDraw.Draw(img).rectangle([0, H - 130, W, H], fill=(0, 0, 0))
+            return img
+
+        if f == "vignette":
+            img2 = self._blurred.copy().convert("RGBA")
+            shadow = Image.new("RGBA", (W, H), (0, 0, 0, 220))
+            g2 = Image.radial_gradient("L").resize((W, H), Image.BICUBIC)
+            shadow.putalpha(g2.point(lambda v: int(220 * min(1.0, v / 120) ** 1.6)))
+            img2.alpha_composite(shadow)
+            return img2.convert("RGB")
+
+        if f == "glass":
+            img = self._blurred.copy()
+            cw, ch = W - 60, H - 240
+            pane = img.crop(((W - cw) // 2, (H - ch) // 2, (W + cw) // 2, (H + ch) // 2))
+            pane = Image.blend(pane.filter(ImageFilter.GaussianBlur(30)),
+                               Image.new("RGB", pane.size, (18, 22, 42)), 0.38)
+            img.paste(pane, ((W - cw) // 2, (H - ch) // 2))
+            return img
+
+        if f == "split":
+            img = _solid_gradient(_mix3(ac, (0, 0, 0), 0.4), dark)
+            ImageDraw.Draw(img).rectangle([0, H // 2, W, H], fill=dark)
+            return img
+
+        if f == "aurora":
+            img = Image.new("RGB", (W, H), (4, 6, 20))
+            c2 = _mix3(ac, (100, 0, 200), 0.5)
+            for cx, cy, r, col, a in ((200, 400, 600, ac, 0.35), (W - 100, 300, 500, c2, 0.3),
+                                       (W // 2, H - 300, 700, _mix3(ac, (0, 200, 100), 0.4), 0.25)):
+                g = Image.radial_gradient("L").resize((r * 2, r * 2), Image.BICUBIC)
+                mask = g.point(lambda v: int(255 * a * max(0.0, 1 - v / 181) ** 1.8))
+                img.paste(Image.new("RGB", (r * 2, r * 2), col), (cx - r, cy - r), mask)
+            # horizontal shimmer bands
+            lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            d = ImageDraw.Draw(lay)
+            for yy in range(100, H - 100, 60):
+                a2 = int(18 + 12 * math.sin(yy / 90))
+                d.line([(0, yy), (W, yy)], fill=(*ac, a2), width=1)
+            img.paste(Image.alpha_composite(img.convert("RGBA"), lay).convert("RGB"))
+            return img
+
+        if f == "retro":
+            img = _solid_gradient((16, 4, 42), (6, 2, 70))
+            d = ImageDraw.Draw(img)
+            # scanlines
+            for yy in range(0, H, 7):
+                d.line([(0, yy), (W, yy)], fill=(0, 0, 0, 22), width=1)
+            # perspective grid at bottom
+            horizon = int(H * 0.72)
+            for i in range(14):
+                t2 = i / 13
+                yg = horizon + int((H - horizon) * (t2 ** 1.4))
+                xo = int((W // 2) * (1 - (1 - t2) ** 2))
+                d.line([(W // 2 - xo, yg), (W // 2 + xo, yg)], fill=(*ac, int(55 * (1 - t2) + 8)), width=1)
+            for i in range(9):
+                t2 = i / 8
+                xg = int(W // 2 * t2)
+                d.line([(W // 2 - (W // 2 - xg), horizon), (W // 2 - (W // 2 - xg), H)],
+                       fill=(*_mix3(ac, (255, 60, 160), 0.5), int(45 * (1 - t2) + 6)), width=1)
+            return img
+
+        if f == "dark":
+            return Image.new("RGB", (W, H), (4, 4, 10))
+
+        if f == "tech":
+            img = Image.new("RGB", (W, H), (4, 10, 6))
+            d = ImageDraw.Draw(img)
+            for gx in range(0, W + 1, 54):
+                d.line([(gx, 0), (gx, H)], fill=(*ac, 22), width=1)
+            for gy in range(0, H + 1, 54):
+                d.line([(0, gy), (W, gy)], fill=(*ac, 22), width=1)
+            # pad dots at intersections (every 3rd)
+            for gx in range(0, W + 1, 162):
+                for gy in range(0, H + 1, 162):
+                    d.ellipse([gx - 5, gy - 5, gx + 5, gy + 5], fill=(*ac, 60))
+            return img
+
+        if f == "cosmos":
+            img = Image.new("RGB", (W, H), (2, 2, 8))
+            rnd = random.Random(99)
+            d = ImageDraw.Draw(img)
+            for _ in range(180):
+                sx, sy = rnd.randint(0, W), rnd.randint(0, H)
+                sr = rnd.choice((1, 1, 1, 2))
+                sa = rnd.randint(100, 240)
+                d.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=(255, 255, 255, sa))
+            for cx, cy, r, col, a in ((W * 0.7, H * 0.3, 420, ac, 0.25),
+                                       (W * 0.2, H * 0.65, 380, _mix3(ac, (200, 100, 255), 0.4), 0.2)):
+                g = Image.radial_gradient("L").resize((r * 2, r * 2), Image.BICUBIC)
+                mask = g.point(lambda v: int(255 * a * max(0.0, 1 - v / 181) ** 2.0))
+                img.paste(Image.new("RGB", (r * 2, r * 2), col), (int(cx) - int(r), int(cy) - int(r)), mask)
+            return img
+
+        # ── corporate ──
+        if f == "corp_navy":
+            return _solid_gradient((8, 24, 68), (4, 12, 36))
+
+        if f == "corp_slate":
+            return _solid_gradient((28, 36, 52), (14, 20, 32))
+
+        if f == "corp_white":
+            return _solid_gradient((245, 247, 252), (228, 234, 248))
+
+        if f == "corp_exec":
+            img = _solid_gradient((8, 8, 10), (18, 18, 22))
+            d = ImageDraw.Draw(img)
+            for yy in range(0, H, 3):
+                d.line([(0, yy), (W, yy)], fill=(255, 255, 255, 4), width=1)
+            return img
+
+        if f == "corp_azure":
+            return _solid_gradient((12, 60, 160), (6, 30, 90))
+
+        if f == "corp_trust":
+            img = _solid_gradient((10, 40, 110), (4, 18, 56))
+            g = Image.radial_gradient("L").resize((W, H), Image.BICUBIC)
+            tint = Image.new("RGBA", (W, H), (20, 80, 200, 0))
+            tint.putalpha(g.point(lambda v: int(60 * max(0.0, 1 - v / 181) ** 1.5)))
+            img.paste(Image.alpha_composite(img.convert("RGBA"), tint).convert("RGB"))
+            return img
+
+        if f == "corp_gold":
+            return _solid_gradient((8, 6, 2), (20, 16, 6))
+
+        return self._blurred.copy()
+
+    # ------------------------------------------------------------------ per-frame chrome
+    def draw(self, frame_img: Image.Image, t: float, cta_layer: Image.Image, seconds: float) -> None:
+        """Draw logo, decorations, and CTA onto frame_img for time t."""
+        f, ac = self.frame, self.accent
+        d = ImageDraw.Draw(frame_img)
+        la = _between(t, 0.1, 0.8)   # logo alpha
+
+        # ── logo placement ──
+        if f == "corp_white":
+            logo = brand.lockup(72, text_color=(14, 22, 50)).convert("RGBA")
+        elif f == "corp_exec":
+            logo = brand.lockup(72, text_color=(220, 220, 230)).convert("RGBA")
+        elif f in ("corp_navy", "corp_slate", "corp_azure", "corp_trust"):
+            logo = brand.lockup(72, text_color=(230, 240, 255)).convert("RGBA")
+        elif f == "corp_gold":
+            logo = brand.lockup(72, text_color=(210, 172, 68)).convert("RGBA")
+        elif f == "film":
+            logo = _lockup(60)
+        else:
+            logo = self.logo64
+        logo_rgba = logo.convert("RGBA")
+        lx = (W - logo.width) // 2
+        ly = 68 if f in ("film", "corp_navy", "corp_slate", "corp_white",
+                          "corp_exec", "corp_azure", "corp_trust", "corp_gold") else 110
+        frame_img.alpha_composite(_faded(logo_rgba, la), (lx, ly))
+
+        # ── decorative elements ──
+        if f == "neon":
+            pulse = 0.7 + 0.3 * math.sin(t * math.pi * 1.4)
+            for thick, alpha in ((6, int(210 * pulse)), (14, int(80 * pulse)), (28, int(28 * pulse))):
+                lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+                ImageDraw.Draw(lay).rounded_rectangle([28, 28, W - 28, H - 28], radius=44,
+                               outline=ac + (alpha,), width=thick)
+                frame_img.alpha_composite(lay)
+
+        elif f == "glass":
+            cw, ch = W - 60, H - 240
+            lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(lay).rounded_rectangle(
+                ((W - cw) // 2, (H - ch) // 2, (W + cw) // 2, (H + ch) // 2),
+                radius=44, outline=(255, 255, 255, 55), width=2)
+            frame_img.alpha_composite(lay)
+
+        elif f == "split":
+            d.line([(0, H // 2 + 50), (W, H // 2 - 50)], fill=(*ac, 90), width=3)
+
+        elif f == "film":
+            d.text((W // 2, H - 65), "cloudtrio.in", font=card._font(28), fill=(190, 190, 190), anchor="mm")
+
+        elif f == "retro":
+            pulse2 = 0.6 + 0.4 * math.sin(t * math.pi * 2.0)
+            d.text((W // 2, 56), "▶  CLOUDTRIO", font=card._font(32, bold=True),
+                   fill=(*ac, int(200 * pulse2)), anchor="mm")
+
+        elif f == "aurora":
+            # shimmer line that moves
+            yy = int(H * 0.18 + 40 * math.sin(t * 0.9))
+            d.line([(60, yy), (W - 60, yy)], fill=(*ac, int(60 * la)), width=2)
+
+        elif f == "tech":
+            # animated scan line
+            scan_y = int((t * 120) % H)
+            d.line([(0, scan_y), (W, scan_y)], fill=(*ac, 40), width=2)
+
+        elif f == "cosmos":
+            # orbital arcs
+            for r2, a2 in ((280, 20), (400, 14), (540, 8)):
+                lay2 = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+                start_a = int(t * 12) % 360
+                ImageDraw.Draw(lay2).arc(
+                    (W // 2 - r2, H // 2 - r2 * 2 // 3, W // 2 + r2, H // 2 + r2 * 2 // 3),
+                    start_a, start_a + 190, fill=(*ac, a2), width=2)
+                frame_img.alpha_composite(lay2)
+
+        # ── corporate accents ──
+        elif f == "corp_navy":
+            d.line([(80, ly + 86), (W - 80, ly + 86)], fill=(*ac, 100), width=2)
+            d.line([(80, H - 90), (W - 80, H - 90)], fill=(*ac, 60), width=1)
+
+        elif f == "corp_slate":
+            for xx in (60, W - 60):
+                d.line([(xx, ly + 20), (xx, ly + 70)], fill=(*ac, 160), width=3)
+            d.line([(60, ly + 86), (W - 60, ly + 86)], fill=(*ac, 80), width=1)
+
+        elif f == "corp_white":
+            d.rectangle([0, 0, W, 8], fill=ac)
+            d.rectangle([0, H - 8, W, H], fill=ac)
+            d.line([(60, ly + 86), (W - 60, ly + 86)], fill=(*ac, 90), width=2)
+
+        elif f == "corp_exec":
+            # platinum corner marks
+            for cx2, cy2, sx2, sy2 in ((50, 50, 1, 1), (W - 50, 50, -1, 1),
+                                        (50, H - 50, 1, -1), (W - 50, H - 50, -1, -1)):
+                d.line([(cx2, cy2), (cx2 + 60 * sx2, cy2)], fill=(180, 180, 200, 180), width=2)
+                d.line([(cx2, cy2), (cx2, cy2 + 60 * sy2)], fill=(180, 180, 200, 180), width=2)
+
+        elif f == "corp_azure":
+            d.rectangle([0, 0, W, 10], fill=(255, 255, 255, 60))
+            d.line([(60, ly + 86), (W - 60, ly + 86)], fill=(255, 255, 255, 60), width=1)
+
+        elif f == "corp_trust":
+            d.rectangle([0, 0, 8, H], fill=(*ac, 200))
+            d.rectangle([W - 8, 0, W, H], fill=(*ac, 200))
+
+        elif f == "corp_gold":
+            gold = (210, 172, 68)
+            d.line([(60, ly + 86), (W - 60, ly + 86)], fill=(*gold, 120), width=2)
+            d.line([(60, H - 90), (W - 60, H - 90)], fill=(*gold, 80), width=1)
+            # small gold squares at corners
+            for cx2, cy2 in ((60, ly - 10), (W - 60, ly - 10)):
+                d.rectangle([cx2 - 5, cy2 - 5, cx2 + 5, cy2 + 5], fill=(*gold, 160))
+
+        # ── CTA ──
+        end = seconds - 3.0
+        if t >= end:
+            rise = _between(t, end, end + 0.8)
+            cta_y = H - 170 if f == "film" else H - 300
+            frame_img.alpha_composite(_faded(cta_layer, rise), (0, cta_y + int((1 - rise) * 40)))
+
+
 def number_in(text: str) -> tuple[str, float, str] | None:
     """The number worth counting up in a headline: ("Save ", 40, "%") style; prefers a %, x or + figure."""
     found = list(re.finditer(r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(%|x\b|\+)?", text))
@@ -244,20 +572,20 @@ def _text_layer(text: str, size: int, *, bold: bool = True, color: tuple[int, in
     return layer
 
 
-def frames(image: Path, *, style: str = "slide", seconds: float = 12, headline: str = "", cta: str = ""):  # noqa: ANN201 - a generator of frames
+def frames(image: Path, *, style: str = "slide", frame: str = "default", seconds: float = 12, headline: str = "", cta: str = ""):  # noqa: ANN201 - a generator of frames
     """Every frame of the Reel, as RGB images."""
     src = Image.open(image).convert("RGBA")
     base_w = W - 120
     card_img = src.resize((base_w, int(src.height * base_w / src.width)), Image.LANCZOS)
-    bg = _background(src)
-    logo = _lockup(64)
+    accent = brand.TEAL
+    renderer = _FrameRenderer(frame, src, accent)
+    bg_base = renderer.bg()
     cta_layer = _text_layer(cta or settings.REEL_CTA, 46)
     card_top = max(200, (H - card_img.height) // 2 - 40)
     figure = number_in(headline) if style == "countup" else None
     if style == "countup" and figure is None:
         style = "slide"
     intro = 2.4 if figure else 0.0
-    accent = brand.TEAL
     label = _text_layer(headline, 44, bold=False, color=(200, 214, 238)) if figure else None
     sheen = Image.new("L", (card_img.width, card_img.height), 0)
     ImageDraw.Draw(sheen).polygon([(0, 0), (140, 0), (40, card_img.height), (-100, card_img.height)], fill=70)
@@ -265,15 +593,14 @@ def frames(image: Path, *, style: str = "slide", seconds: float = 12, headline: 
     total = int(seconds * FPS)
     for n in range(total):
         t = n / FPS
-        frame = bg.copy().convert("RGBA")
-        frame.alpha_composite(_faded(logo, _between(t, 0.1, 0.8)), ((W - logo.width) // 2, 110))
+        frame_img = bg_base.copy().convert("RGBA")
         if figure and t < intro + 0.4:  # the number counts up, then gives way to the card
             fade = 1 - _between(t, intro, intro + 0.4)
             value = figure[1] * _ease(t / (intro - 0.4))
             shown = f"{value:,.0f}" if "," in figure[0] or value >= 1000 else (f"{value:.1f}" if "." in figure[0] else f"{value:.0f}")
             big = _text_layer(f"{shown}{figure[2]}", 260, color=accent)
-            frame.alpha_composite(_faded(big, fade), (0, H // 2 - 300))
-            frame.alpha_composite(_faded(label, fade * _between(t, 0.3, 1.0)), (0, H // 2 + 20))
+            frame_img.alpha_composite(_faded(big, fade), (0, H // 2 - 300))
+            frame_img.alpha_composite(_faded(label, fade * _between(t, 0.3, 1.0)), (0, H // 2 + 20))
         ct = t - intro
         if ct >= 0:
             img, x, y = card_img, (W - card_img.width) // 2, card_top
@@ -285,7 +612,6 @@ def frames(image: Path, *, style: str = "slide", seconds: float = 12, headline: 
                 grow = 1.18 - 0.18 * _between(ct, 0.0, 1.6)
                 img = _faded(card_img, _between(ct, 0.0, 0.6))
             elif style == "drift":
-                # slides in from the right with a slight tilt that straightens on landing
                 progress = _between(ct, 0.0, 1.0)
                 x = int((W + 150) * (1 - progress) + (W - card_img.width) // 2 * progress)
                 angle = 6.0 * (1 - _ease(min(1.0, ct / 1.0)))
@@ -299,43 +625,42 @@ def frames(image: Path, *, style: str = "slide", seconds: float = 12, headline: 
                     scaled = img.resize((int(img.width * grow), int(img.height * grow)), Image.BILINEAR)
                     x, y = x - (scaled.width - img.width) // 2, y - (scaled.height - img.height) // 2
                     img = scaled
-                frame.alpha_composite(img, (x, y))
-                continue  # skip the generic grow/composite below
+                frame_img.alpha_composite(img, (x, y))
+                renderer.draw(frame_img, t, cta_layer, seconds)
+                yield frame_img.convert("RGB")
+                continue
             elif style == "split":
-                # background tears apart, card is revealed behind it
                 grow = 1.0
                 if ct < 1.2:
                     split_progress = _ease(ct / 1.2)
                     offset = int(split_progress * 420)
-                    split_frame = Image.new("RGB", (W, H), (6, 14, 30))
-                    top_half = bg.crop((0, 0, W, H // 2))
-                    bot_half = bg.crop((0, H // 2, W, H))
-                    split_frame.paste(top_half, (0, -offset))
-                    split_frame.paste(bot_half, (0, H // 2 + offset))
-                    card_alpha = _between(ct, 0.4, 1.0)
-                    split_frame = split_frame.convert("RGBA")
-                    split_frame.alpha_composite(_faded(card_img, card_alpha), (x, y))
-                    frame.alpha_composite(split_frame, (0, 0))
+                    sf = Image.new("RGB", (W, H), (6, 14, 30))
+                    sf.paste(bg_base.crop((0, 0, W, H // 2)), (0, -offset))
+                    sf.paste(bg_base.crop((0, H // 2, W, H)), (0, H // 2 + offset))
+                    sf = sf.convert("RGBA")
+                    sf.alpha_composite(_faded(card_img, _between(ct, 0.4, 1.0)), (x, y))
+                    frame_img.alpha_composite(sf, (0, 0))
                 else:
-                    frame.alpha_composite(card_img, (x, y))
+                    frame_img.alpha_composite(card_img, (x, y))
+                renderer.draw(frame_img, t, cta_layer, seconds)
+                yield frame_img.convert("RGB")
                 continue
             elif style == "focus":
-                # starts blurred and sharpens into focus
                 blur_r = max(0, int(18 * (1 - _between(ct, 0.0, 1.8))))
                 scale = 1.08 - 0.08 * _between(ct, 0.0, 1.8)
                 blurred = card_img.filter(ImageFilter.GaussianBlur(blur_r)) if blur_r > 0 else card_img
                 blurred = _faded(blurred, _between(ct, 0.0, 0.5))
-                scaled_w, scaled_h = int(card_img.width * scale), int(card_img.height * scale)
                 if abs(scale - 1) > 0.005:
-                    blurred = blurred.resize((scaled_w, scaled_h), Image.BILINEAR)
-                sx = (W - blurred.width) // 2
-                sy = card_top - (blurred.height - card_img.height) // 2
-                frame.alpha_composite(blurred, (sx, sy))
+                    blurred = blurred.resize((int(card_img.width * scale), int(card_img.height * scale)), Image.BILINEAR)
+                frame_img.alpha_composite(blurred, ((W - blurred.width) // 2, card_top - (blurred.height - card_img.height) // 2))
+                renderer.draw(frame_img, t, cta_layer, seconds)
+                yield frame_img.convert("RGB")
                 continue
             elif style == "float":
-                # card bobs gently, background drifts in opposite direction
                 bob_y = int(14 * math.sin(ct * math.pi * 0.55))
-                frame.alpha_composite(card_img, (x, y + bob_y))
+                frame_img.alpha_composite(card_img, (x, y + bob_y))
+                renderer.draw(frame_img, t, cta_layer, seconds)
+                yield frame_img.convert("RGB")
                 continue
             else:  # reveal
                 grow = 1.0
@@ -352,12 +677,9 @@ def frames(image: Path, *, style: str = "slide", seconds: float = 12, headline: 
             if grow != 1:
                 img = img.resize((int(card_img.width * grow), int(card_img.height * grow)), Image.BILINEAR)
                 x, y = (W - img.width) // 2, y - (img.height - card_img.height) // 2
-            frame.alpha_composite(img, (x, y))
-        end = seconds - 3.0
-        if t >= end:
-            rise = _between(t, end, end + 0.8)
-            frame.alpha_composite(_faded(cta_layer, rise), (0, H - 300 + int((1 - rise) * 40)))
-        yield frame.convert("RGB")
+            frame_img.alpha_composite(img, (x, y))
+        renderer.draw(frame_img, t, cta_layer, seconds)
+        yield frame_img.convert("RGB")
 
 
 def encode(frames, out: Path, *, seconds: float, track: str, cover_at: float | None = None) -> tuple[Path, Path]:  # noqa: ANN001
@@ -395,25 +717,27 @@ def encode(frames, out: Path, *, seconds: float, track: str, cover_at: float | N
     return out, cover
 
 
-def render(image: Path, out: Path, *, style: str = "slide", track: str = "upbeat", seconds: float | None = None,
-           headline: str = "", cta: str = "") -> tuple[Path, Path]:  # fmt: skip
+def render(image: Path, out: Path, *, style: str = "slide", track: str = "upbeat", frame: str = "default",
+           seconds: float | None = None, headline: str = "", cta: str = "") -> tuple[Path, Path]:  # fmt: skip
     """The simple Reel: the finished picture moving. Returns (video, cover)."""
     style = style if style in SIMPLE_IDS else "slide"
+    frame = frame if frame in FRAME_IDS else "default"
     seconds = float(seconds or settings.REEL_SECONDS)
-    result = encode(frames(image, style=style, seconds=seconds, headline=headline, cta=cta), out, seconds=seconds, track=track)
-    logger.info("motion.rendered file=%s style=%s track=%s", out.name, style, track)
+    result = encode(frames(image, style=style, frame=frame, seconds=seconds, headline=headline, cta=cta), out, seconds=seconds, track=track)
+    logger.info("motion.rendered file=%s style=%s frame=%s track=%s", out.name, style, frame, track)
     return result
 
 
-def render_flyer(flyer: Any, out: Path, *, preset: str = "auto", track: str = "upbeat", highlight: list[str] | None = None,
-                 number: str = "", badge: str = "") -> tuple[Path, Path, str]:  # fmt: skip
+def render_flyer(flyer: Any, out: Path, *, preset: str = "auto", track: str = "upbeat", frame: str = "default",
+                 highlight: list[str] | None = None, number: str = "", badge: str = "") -> tuple[Path, Path, str]:  # fmt: skip
     """The animated marketing flyer (see :mod:`technews.kinetic`): its words move, cut on the beat.
     Returns (video, cover, the preset used)."""
     from technews import instagram, kinetic
 
     preset = preset if preset in kinetic.PRESET_IDS else kinetic.auto_preset(flyer)
+    frame = frame if frame in FRAME_IDS else "default"
     film = kinetic.Film(flyer, preset=preset, bpm=kinetic.TRACK_BPM.get(track, 120), handle=instagram.session_user() or settings.IG_HANDLE,
                         highlight=highlight, number=number, badge=badge)  # fmt: skip
     video, cover = encode(film.frames(), out, seconds=film.length, track=track, cover_at=film.cover_at)
-    logger.info("motion.rendered_flyer file=%s preset=%s track=%s seconds=%.1f", out.name, preset, track, film.length)
+    logger.info("motion.rendered_flyer file=%s preset=%s frame=%s track=%s seconds=%.1f", out.name, preset, frame, track, film.length)
     return video, cover, preset

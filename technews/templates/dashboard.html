@@ -792,7 +792,8 @@
               <button class="btn ghost" type="button" onclick="decide({{ p.id }}, 'reject', this)">Reject</button>
             </div>
             {% if reels_ok %}<div class="row" style="margin-top:8px">
-              <label class="sr" for="rs-{{ p.id }}">Movement</label><select id="rs-{{ p.id }}" style="max-width:11em">{% for k, l in reel_styles %}<option value="{{ k }}" {{ 'selected' if reel.style == k }}>{{ l }}</option>{% endfor %}</select>
+              <label class="sr" for="rs-{{ p.id }}">Animation</label><select id="rs-{{ p.id }}" style="max-width:11em">{% for k, l in reel_styles %}<option value="{{ k }}" {{ 'selected' if reel.style == k }}>{{ l }}</option>{% endfor %}</select>
+              <label class="sr" for="rf-{{ p.id }}">Frame</label><select id="rf-{{ p.id }}" style="max-width:12em">{% for k, l in reel_frames %}<option value="{{ k }}" {{ 'selected' if reel.frame == k }}>{{ l }}</option>{% endfor %}</select>
               <label class="sr" for="rt-{{ p.id }}">Music</label><select id="rt-{{ p.id }}" style="max-width:13em">{% for k, l in reel_tracks %}<option value="{{ k }}" {{ 'selected' if reel.track == k }}>{{ l }}</option>{% endfor %}</select>
               <button class="btn ghost" type="button" onclick="reelSet({{ p.id }}, true, this)">{{ "Redo the Reel" if reel.video else "Make it a Reel" }}</button>
               {% if reel.video %}<button class="btn ghost" type="button" onclick="reelSet({{ p.id }}, false, this)">Post as a picture</button>{% endif %}
@@ -836,11 +837,13 @@
             <label for="rcap-{{ p.id }}">Caption</label>
             <textarea id="rcap-{{ p.id }}">{{ p.caption }}</textarea>
             <div class="row" style="margin-top:8px">
-              <label class="sr" for="rrs-{{ p.id }}">Style</label>
-              <select id="rrs-{{ p.id }}" style="max-width:14em">{% for k, l in reel_styles %}<option value="{{ k }}" {{ 'selected' if reel.style == k }}>{{ l }}</option>{% endfor %}</select>
+              <label class="sr" for="rrs-{{ p.id }}">Animation</label>
+              <select id="rrs-{{ p.id }}" style="max-width:12em">{% for k, l in reel_styles %}<option value="{{ k }}" {{ 'selected' if reel.style == k }}>{{ l }}</option>{% endfor %}</select>
+              <label class="sr" for="rrf-{{ p.id }}">Frame</label>
+              <select id="rrf-{{ p.id }}" style="max-width:13em">{% for k, l in reel_frames %}<option value="{{ k }}" {{ 'selected' if reel.frame == k }}>{{ l }}</option>{% endfor %}</select>
               <label class="sr" for="rrt-{{ p.id }}">Music</label>
-              <select id="rrt-{{ p.id }}" style="max-width:13em">{% for k, l in reel_tracks %}<option value="{{ k }}" {{ 'selected' if reel.track == k }}>{{ l }}</option>{% endfor %}</select>
-              <button class="btn ghost" type="button" onclick="reelSetR({{ p.id }}, this)">Redo Reel</button>
+              <select id="rrt-{{ p.id }}" style="max-width:12em">{% for k, l in reel_tracks %}<option value="{{ k }}" {{ 'selected' if reel.track == k }}>{{ l }}</option>{% endfor %}</select>
+              <button class="btn ghost" type="button" onclick="reelSetR({{ p.id }}, this)">▶ Preview with this style</button>
             </div>
             {% if p.flyer %}
             <details style="margin-top:6px"><summary>Animated text options</summary>
@@ -1423,6 +1426,7 @@
         <b id="dlg-title"></b>
         <div id="dlg-reel-info" hidden style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">
           <span class="pill low" id="dlg-style-badge"></span>
+          <span class="pill low" id="dlg-frame-badge"></span>
           <span class="pill low" id="dlg-track-badge"></span>
         </div>
       </div>
@@ -1569,6 +1573,7 @@
   const THEMES = {{ flyer_themes|tojson }}, PALETTES = {{ flyer_palettes|tojson }}, PENDING_META = {{ pending_meta|tojson }};
   const REEL_STYLE_LABELS = { {% for k, l in reel_styles %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
   const REEL_TRACK_LABELS = { {% for k, l in reel_tracks %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
+  const REEL_FRAME_LABELS = { {% for k, l in reel_frames %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
   const NEWSROOM_KEYS = ["BLOCKED_WORDS","WATCHDOG_MINUTES","SCAN_INTERVAL_MINUTES","SCAN_MAX_AGE_HOURS","SCAN_MIN_SCORE","REVIEW_MIN_SCORE","FLYER_AFTER_NEWS","APPROVAL_QUEUE_MAX","TIMEZONE","FLYERS_ENABLED"];
   const NOTIFY_KEYS = ["PUBLIC_URL","NOTIFY_EMAIL_TO","SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","WHATSAPP_PROVIDER","WHATSAPP_TO","WHATSAPP_APIKEY","TWILIO_SID","TWILIO_WHATSAPP_FROM","TELEGRAM_BOT_TOKEN","TELEGRAM_CHAT_ID","NOTIFY_WEBHOOK_URL"];
   const PENDING = {{ status.pending }}, REELS_PENDING = {{ status.reels_pending }}, CHANNELS = {{ status.notify|tojson }};
@@ -1752,7 +1757,7 @@
     const i = $("dlg-img"); if (i) i.hidden = false;
     document.getElementById("dlg").close();
   }
-  function previewReel(video, cover, title, style, track) {
+  function previewReel(video, cover, title, style, track, frame) {
     const dlg = document.getElementById("dlg");
     $("dlg-title").textContent = title || "Reel preview";
     $("dlg-img").hidden = true;
@@ -1760,9 +1765,11 @@
     $("dlg-link").hidden = true;
     // show style + music badges when available
     const infoEl = $("dlg-reel-info");
-    if (style || track) {
-      $("dlg-style-badge").textContent = "Style: " + (REEL_STYLE_LABELS[style] || style || "—");
-      $("dlg-track-badge").textContent  = "Music: " + (REEL_TRACK_LABELS[track]  || track  || "—");
+    if (style || track || frame) {
+      $("dlg-style-badge").textContent = "Style: "  + (REEL_STYLE_LABELS[style]  || style  || "—");
+      $("dlg-track-badge").textContent  = "Music: "  + (REEL_TRACK_LABELS[track]  || track  || "—");
+      const fb = $("dlg-frame-badge");
+      if (fb) fb.textContent = "Frame: " + (REEL_FRAME_LABELS[frame] || frame || "—");
       infoEl.hidden = false;
     } else {
       infoEl.hidden = true;
@@ -1791,12 +1798,12 @@
   async function reelSet(id, on, btn) {
     btn.disabled = true; const label = btn.textContent; btn.textContent = on ? "Rendering…" : "Working…";
     try {
-      const [ok, d] = await api(`/api/posts/${id}/reel`, { on, style: $("rs-" + id).value, track: $("rt-" + id).value,
+      const [ok, d] = await api(`/api/posts/${id}/reel`, { on, style: $("rs-" + id)?.value, track: $("rt-" + id)?.value, frame: $("rf-" + id)?.value || "default",
         highlight: $("rh-" + id) ? $("rh-" + id).value : undefined, number: $("rn-" + id) ? $("rn-" + id).value : undefined, badge: $("rb-" + id) ? $("rb-" + id).value : undefined });
       if (ok && on && d.video) {
         _injectInlineVideo(id, d);
         const title = document.querySelector(`#post-${id} h2`)?.textContent || "";
-        previewReel(d.video, d.cover, title, d.style, d.track);
+        previewReel(d.video, d.cover, title, d.style, d.track, d.frame);
       } else if (ok && !on) {
         toast("It will be posted as a picture.", false);
         setTimeout(() => location.reload(), 700);
@@ -1812,14 +1819,15 @@
     try {
       const style = $("rs-" + id)?.value || "auto";
       const track = $("rt-" + id)?.value || "upbeat";
+      const frame = $("rf-" + id)?.value || "default";
       const highlight = $("rh-" + id)?.value || "";
       const number = $("rn-" + id)?.value || "";
       const badge  = $("rb-" + id)?.value || "";
-      const [ok, d] = await api(`/api/posts/${id}/reel`, { on: true, style, track, highlight, number, badge });
+      const [ok, d] = await api(`/api/posts/${id}/reel`, { on: true, style, track, frame, highlight, number, badge });
       if (ok && d.video) {
         _injectInlineVideo(id, d);
         const title = document.querySelector(`#post-${id} h2`)?.textContent || "";
-        previewReel(d.video, d.cover, title, d.style, d.track);
+        previewReel(d.video, d.cover, title, d.style, d.track, d.frame);
       } else {
         toast(d.reason || d.error || "That did not work.", true);
       }
@@ -1831,13 +1839,14 @@
     try {
       const style = $("rrs-" + id)?.value || "auto";
       const track = $("rrt-" + id)?.value || "upbeat";
+      const frame = $("rrf-" + id)?.value || "default";
       const highlight = $("rrh-" + id)?.value || "";
       const number   = $("rrn-" + id)?.value || "";
       const badge    = $("rrb-" + id)?.value || "";
-      const [ok, d] = await api(`/api/posts/${id}/reel`, { on: true, style, track, highlight, number, badge });
+      const [ok, d] = await api(`/api/posts/${id}/reel`, { on: true, style, track, frame, highlight, number, badge });
       if (ok && d.video) {
         const title = document.querySelector(`#reel-${id} h2`)?.textContent || "";
-        previewReel(d.video, d.cover, title, d.style, d.track);
+        previewReel(d.video, d.cover, title, d.style, d.track, d.frame);
       } else {
         toast(d.reason || d.error || "That did not work.", true);
       }

@@ -436,7 +436,8 @@ def create_app() -> Flask:
         words = body.get("highlight")
         if isinstance(words, str):
             words = [w for w in re.split(r"[,\n]+", words) if w.strip()]
-        out = pipeline.set_reel(post_id, bool(body.get("on", True)), style=str(body.get("style", "")), track=str(body.get("track", "")),
+        out = pipeline.set_reel(post_id, bool(body.get("on", True)), style=str(body.get("style", "")),
+                                track=str(body.get("track", "")), frame=str(body.get("frame", "")),
                                 highlight=[str(w) for w in words] if isinstance(words, list) else None,
                                 number=str(body["number"]) if isinstance(body.get("number"), str) else None,
                                 badge=str(body["badge"]) if isinstance(body.get("badge"), str) else None)  # fmt: skip
@@ -486,7 +487,7 @@ def create_app() -> Flask:
         pending_reel  = [p for p in pending if     (pending_meta.get(p["id"]) or {}).get("reel", {}).get("video")]
         return render_template("dashboard.html", brand_list=[b for b in brands.listing() if b["enabled"]], brand_now=g.brand["id"], status=status(), stories=stories, posts=posts, pending=pending,
                                pending_still=pending_still, pending_reel=pending_reel,
-                               insights=insights(), flyer_layouts=flyers.LAYOUTS, reels_ok=motion.available(), reel_styles=motion.STYLES, reel_tracks=motion.TRACKS,
+                               insights=insights(), flyer_layouts=flyers.LAYOUTS, reels_ok=motion.available(), reel_styles=motion.STYLES, reel_tracks=motion.TRACKS, reel_frames=motion.FRAMES,
                                pending_meta=pending_meta,
                                pending_notes={p["id"]: db.rows('SELECT "user" AS user, text, at FROM notes WHERE post_id = ? ORDER BY id', p["id"]) for p in pending},
                                news_tags=[(k, {"AI": "AI", "DEVOPS": "DevOps"}.get(v, v.title())) for k, v in card.LABEL.items()], flyer_themes=flyers.theme_defaults(),
