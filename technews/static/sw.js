@@ -1,10 +1,29 @@
 /* CloudTrio Newsroom: lets the app install, shows push alerts, and shows a page when offline.
    Signed-in pages and data are never cached, so nothing private is stored on the device. */
-const CACHE = "ct-static-v1";
+const CACHE = "ct-static-v2";
 const OFFLINE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Offline</title><body style="font:16px system-ui;background:#070f20;color:#e8f0fc;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:24px">
-<div><h1 style="margin:0 0 8px">You are offline</h1><p style="color:#9db0cf">CloudTrio Newsroom needs a connection. Try again when you are back online.</p>
-<button onclick="location.reload()" style="background:#2fd4c4;color:#04202a;border:0;border-radius:10px;padding:12px 20px;font:inherit;font-weight:700">Retry</button></div>`;
+<div><h1 style="margin:0 0 8px">You are offline</h1><p style="color:#9db0cf">CloudTrio Newsroom needs a connection. Retrying automatically…</p>
+<button onclick="location.reload()" style="background:#2fd4c4;color:#04202a;border:0;border-radius:10px;padding:12px 20px;font:inherit;font-weight:700">Retry now</button></div>
+<script>let n=0;const id=setInterval(async()=>{try{const r=await fetch(location.href,{method:"HEAD",cache:"no-store"});if(r.ok){clearInterval(id);location.reload();}}catch(e){}if(++n>40)clearInterval(id);},3000);</script>`;
+
+// Fetch a navigation, retrying a few times with backoff before giving up — so a brief
+// network blip no longer kicks the app to the offline page.
+async function navFetch(req) {
+  const tries = 3, timeoutMs = 4500;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const res = await fetch(req.clone(), { signal: ctrl.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (err) {
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+    }
+  }
+  return new Response(OFFLINE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
 
 self.addEventListener("install", (e) => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/static/icon-192.png", "/static/logo-mark.png"]))); });
 self.addEventListener("activate", (e) => {
@@ -14,7 +33,7 @@ self.addEventListener("fetch", (e) => {
   const r = e.request, url = new URL(r.url);
   if (r.method !== "GET" || url.origin !== location.origin) return;
   if (r.mode === "navigate") {
-    e.respondWith(fetch(r).catch(() => new Response(OFFLINE, { headers: { "Content-Type": "text/html; charset=utf-8" } })));
+    e.respondWith(navFetch(r));
   } else if (url.pathname.startsWith("/static/")) {
     e.respondWith(caches.match(r).then((hit) => hit || fetch(r).then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(r, copy)); return res; })));
   }
