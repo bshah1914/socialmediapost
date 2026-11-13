@@ -1,6 +1,6 @@
 /* CloudTrio Newsroom: lets the app install, shows push alerts, and shows a page when offline.
    Signed-in pages and data are never cached, so nothing private is stored on the device. */
-const CACHE = "ct-static-v2";
+const CACHE = "ct-static-v3";
 const OFFLINE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Offline</title><body style="font:16px system-ui;background:#070f20;color:#e8f0fc;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:24px">
 <div><h1 style="margin:0 0 8px">You are offline</h1><p style="color:#9db0cf">CloudTrio Newsroom needs a connection. Retrying automatically…</p>

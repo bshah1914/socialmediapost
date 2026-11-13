@@ -1904,7 +1904,17 @@
   addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; $("install").hidden = false; });
   addEventListener("appinstalled", () => { $("install").hidden = true; toast("Installed. Open it from your home screen or app list."); });
   async function installApp() { if (installPrompt) { installPrompt.prompt(); installPrompt = null; $("install").hidden = true; } }
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  if ("serviceWorker" in navigator) {
+    // Version the SW URL with the server build so a deploy always fetches a fresh worker
+    // (defeats any edge/CDN cache sitting on /sw.js), and reload once the new one takes over.
+    const hadController = !!navigator.serviceWorker.controller;
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (refreshing || !hadController) return;   // don't reload on the very first install
+      refreshing = true; location.reload();
+    });
+    navigator.serviceWorker.register("/sw.js?v={{ build }}").then((reg) => { try { reg.update(); } catch (e) {} }).catch(() => {});
+  }
   (function alerts() {
     if (PENDING) document.title = "(" + PENDING + ") " + document.title;
     const last = Number(store.get("seenPending") || "0"); store.set("seenPending", String(PENDING));

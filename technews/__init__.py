@@ -36,6 +36,7 @@ class _Sessions(SecureCookieSessionInterface):
 def create_app() -> Flask:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     app = Flask(__name__)
+    build_id = str(int(time.time()))  # changes on every (re)start, so a deploy busts cached assets/SW
     db.init()
     config.seed()
     config.refresh(force=True)
@@ -493,7 +494,7 @@ def create_app() -> Flask:
                                news_tags=[(k, {"AI": "AI", "DEVOPS": "DevOps"}.get(v, v.title())) for k, v in card.LABEL.items()], flyer_themes=flyers.theme_defaults(),
                                flyer_palettes=flyers.PALETTES,
                                flyer_after=settings.FLYER_AFTER_NEWS, user=session.get("user") or "api", role=g.role, my_two_step=bool(g.user and g.user["totp"]), two_step_mode=users.two_step_mode(),
-                               device=this_device(), logins=devices.recent(), current_dev=session.get("dev", ""))
+                               device=this_device(), logins=devices.recent(), current_dev=session.get("dev", ""), build=build_id)
 
     @app.get("/health")
     def health() -> Any:
