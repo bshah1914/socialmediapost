@@ -14,12 +14,14 @@ from __future__ import annotations
 import io
 import json
 import logging
+import random
 import shutil
 import threading
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 from zoneinfo import ZoneInfo
 
 from technews import brands, card, db, flyers, instagram, linkedin, motion, notify, rules, sources
@@ -239,39 +241,95 @@ def _draft_flyer(post: dict[str, Any]) -> flyers.Flyer | None:
     return flyers.get(post["flyer"])
 
 
-def make_reel(post_id: int, *, style: str = "", track: str = "", frame: str = "",
+#: animated-text presets (kinetic typography), best for the lively "words move" look
+TEXT_PRESETS: Final = ("bold", "neon", "magazine", "impact", "corporate", "tech", "offer", "story", "data", "minimal",
+                       "bounce", "spring", "scale", "elegant", "pulse", "matrix")
+#: colour themes to rotate for news reels, so consecutive ones look different
+NEWS_THEMES: Final = ("classic", "aurora", "stage", "neon", "cosmic", "gilded", "retro", "blueprint", "horizon", "impact")
+
+
+def _recent_reel(field: str, limit: int = 5) -> list[str]:
+    """What the last few reels used for ``field`` (style/theme), newest first — to avoid repeats."""
+    seen: list[str] = []
+    for r in db.rows("SELECT meta FROM posts WHERE brand_id = ? AND meta LIKE '%\"reel\": {%' ORDER BY id DESC LIMIT ?",
+                     settings.BRAND_ID, limit):
+        try:
+            v = (json.loads(r["meta"]).get("reel") or {}).get(field)
+        except (ValueError, TypeError):
+            v = None
+        if v:
+            seen.append(str(v))
+    return seen
+
+
+def _rotate(options: tuple[str, ...], avoid: list[str]) -> str:
+    """Pick an option not among the recently-used ones (random, for variety)."""
+    fresh = [o for o in options if o not in avoid] or list(options)
+    return random.choice(fresh)
+
+
+def _news_flyer(post: dict[str, Any], meta: dict[str, Any], theme: str) -> flyers.Flyer:
+    """A synthetic flyer built from a news draft, so the animated-text engine can animate the story."""
+    story = db.story(post["story_id"]) or {}
+    category = meta.get("category") or story.get("category", "other")
+    source = meta.get("source") or story.get("source", "")
+    points = tuple(str(p) for p in (meta.get("points") or []) if str(p).strip())
+    return flyers.Flyer(
+        id=flyers.NEWS_ID, kicker=card.LABEL.get(category, "TECH NEWS"), headline=post["headline"],
+        points=points or (post["headline"],), cta=settings.REEL_CTA or "Follow for more",
+        note=f"Source: {source}" if source else "", caption=post["caption"],
+        layout=theme if theme in flyers.LAYOUT_IDS else "classic",
+    )  # fmt: skip
+
+
+def make_reel(post_id: int, *, style: str = "", track: str = "", frame: str = "", theme: str = "",
               highlight: list[str] | None = None, number: str | None = None, badge: str | None = None) -> dict[str, Any]:  # fmt: skip
-    """Turn a waiting post into a Reel, or redo its Reel."""
+    """Turn a waiting post into a Reel, or redo its Reel.
+
+    News and flyers both get the lively animated-text look by default; a *simple* movement
+    (slide/zoom/…) is used only when one is explicitly chosen. The animation preset and colour
+    theme rotate so consecutive reels look different."""
     found = db.rows("SELECT * FROM posts WHERE id = ? AND status = 'pending'", post_id)
     if not found:
         return {"ok": False, "reason": "that post is not waiting for approval"}
     post = found[0]
+    is_flyer = bool(post["flyer"])
     meta = draft_meta(post)
     before = meta.get("reel") if isinstance(meta.get("reel"), dict) else {}
     wanted = settings.REEL_STYLE if settings.REEL_STYLE in motion.STYLE_IDS else ""
     style = style if style in motion.STYLE_IDS else (before.get("style") or wanted)
     track = track if track in motion.TRACK_IDS else (before.get("track") or settings.REEL_MUSIC)
     frame = frame if frame in motion.FRAME_IDS else (before.get("frame") or "default")
+    theme = theme if theme in flyers.LAYOUT_IDS else (before.get("theme") or "")
     highlight = [h.strip() for h in (highlight if highlight is not None else before.get("highlight") or []) if str(h).strip()][:6]
     number = (number if number is not None else before.get("number") or "").strip()[:30]
     badge = (badge if badge is not None else before.get("badge") or "").strip()[:40]
+    # no explicit animation chosen → rotate a fresh animated-text preset for variety
+    if not style:
+        style = _rotate(TEXT_PRESETS, _recent_reel("style"))
     out = settings.CARDS_DIR / f"reel-{post_id}-{int(time.time() * 1000)}.mp4"
     try:
-        if style in motion.SIMPLE_IDS or not post["flyer"]:
+        if style in motion.SIMPLE_IDS:  # a simple card movement, only when explicitly picked
             image = settings.CARDS_DIR / Path(str(post["image_path"]).replace("\\", "/")).name
             text = " ".join([post["headline"], *((meta.get("flyer") or {}).get("points") or [])])
-            video, cover = motion.render(image, out, style=style or "slide", track=track, frame=frame,
+            video, cover = motion.render(image, out, style=style, track=track, frame=frame,
                                          headline=text if style == "countup" else post["headline"])
-        else:
-            flyer = _draft_flyer(post)
-            if flyer is None:
-                return {"ok": False, "reason": "The flyer of this draft no longer exists."}
+        else:  # animated-text (kinetic typography) — flyers and news alike
+            if is_flyer:
+                flyer = _draft_flyer(post)
+                if flyer is None:
+                    return {"ok": False, "reason": "The flyer of this draft no longer exists."}
+                if theme:  # a colour chosen in the UI overrides the flyer's own palette for the reel
+                    flyer = replace(flyer, layout=theme, style={})
+            else:
+                theme = theme or _rotate(NEWS_THEMES, _recent_reel("theme"))
+                flyer = _news_flyer(post, meta, theme)
             video, cover, style = motion.render_flyer(flyer, out, preset=style or "auto", track=track, frame=frame,
                                                        highlight=highlight, number=number, badge=badge)
     except (motion.MotionError, OSError) as exc:
         logger.warning("pipeline.reel_failed post=%s error=%s", post_id, str(exc)[:200])
         return {"ok": False, "reason": str(exc)[:300]}
-    meta["reel"] = {"style": style, "track": track, "frame": frame, "video": video.name, "cover": cover.name,
+    meta["reel"] = {"style": style, "track": track, "frame": frame, "theme": theme, "video": video.name, "cover": cover.name,
                     "highlight": highlight, "number": number, "badge": badge}
     db.execute("UPDATE posts SET meta = ? WHERE id = ?", json.dumps(meta), post_id)
     return {"ok": True, "post_id": post_id, **meta["reel"]}
@@ -287,10 +345,10 @@ def drop_reel(post_id: int) -> dict[str, Any]:
     return {"ok": True, "post_id": post_id}
 
 
-def set_reel(post_id: int, on: bool, *, style: str = "", track: str = "", frame: str = "",
+def set_reel(post_id: int, on: bool, *, style: str = "", track: str = "", frame: str = "", theme: str = "",
              highlight: list[str] | None = None, number: str | None = None, badge: str | None = None) -> dict[str, Any]:  # fmt: skip
     with _as_post_brand(post_id):
-        return make_reel(post_id, style=style, track=track, frame=frame, highlight=highlight, number=number, badge=badge) if on else drop_reel(post_id)
+        return make_reel(post_id, style=style, track=track, frame=frame, theme=theme, highlight=highlight, number=number, badge=badge) if on else drop_reel(post_id)
 
 
 def _publish_ig(post: dict[str, Any], image: Path, text: str) -> dict[str, str]:

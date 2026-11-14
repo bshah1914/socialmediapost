@@ -438,7 +438,7 @@ def create_app() -> Flask:
         if isinstance(words, str):
             words = [w for w in re.split(r"[,\n]+", words) if w.strip()]
         out = pipeline.set_reel(post_id, bool(body.get("on", True)), style=str(body.get("style", "")),
-                                track=str(body.get("track", "")), frame=str(body.get("frame", "")),
+                                track=str(body.get("track", "")), frame=str(body.get("frame", "")), theme=str(body.get("theme", "")),
                                 highlight=[str(w) for w in words] if isinstance(words, list) else None,
                                 number=str(body["number"]) if isinstance(body.get("number"), str) else None,
                                 badge=str(body["badge"]) if isinstance(body.get("badge"), str) else None)  # fmt: skip

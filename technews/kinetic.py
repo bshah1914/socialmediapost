@@ -39,6 +39,8 @@ PRESETS: Final = (
     ("bold", "Bold"), ("corporate", "Corporate"), ("tech", "Tech"), ("offer", "Offer"),
     ("minimal", "Minimal"), ("neon", "Neon"), ("magazine", "Magazine"),
     ("impact", "Impact"), ("story", "Story"), ("data", "Data"),
+    ("bounce", "Bounce"), ("spring", "Spring"), ("scale", "Scale"),
+    ("elegant", "Elegant"), ("pulse", "Pulse"), ("matrix", "Matrix"),
 )
 PRESET_IDS: Final = frozenset(k for k, _ in PRESETS)
 TRACK_BPM: Final = {"upbeat": 112, "calm": 60}
@@ -73,6 +75,13 @@ STYLE: Final = {
     "impact":    Preset("slam",  True,  True,  False, False, False),
     "story":     Preset("rise",  False, False, False, False, False, slow=True),
     "data":      Preset("type",  False, False, True,  True,  False),
+    # --- new animation options ---
+    "bounce":    Preset("drop",  True,  True,  False, False, False),                      # words drop & bounce in
+    "spring":    Preset("wave",  False, True,  False, False, True),                       # words spring up elastically
+    "scale":     Preset("zoom",  True,  True,  False, False, True),                       # words scale up with a sweep
+    "elegant":   Preset("fade",  False, False, False, False, False, big_hook=True),       # soft, oversized, luxurious
+    "pulse":     Preset("drop",  False, True,  False, True,  False, glow=True),           # bouncy glow + stamp
+    "matrix":    Preset("zoom",  False, False, True,  False, False, glow=True),           # tech grid + glowing zoom
 }
 
 
@@ -92,6 +101,30 @@ def ease_back(t: float) -> float:
     t = _clip(t)
     c = 1.70158
     return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2
+
+
+def ease_bounce(t: float) -> float:
+    """Ease out with a bounce landing."""
+    t = _clip(t)
+    n, d = 7.5625, 2.75
+    if t < 1 / d:
+        return n * t * t
+    if t < 2 / d:
+        t -= 1.5 / d
+        return n * t * t + 0.75
+    if t < 2.5 / d:
+        t -= 2.25 / d
+        return n * t * t + 0.9375
+    t -= 2.625 / d
+    return n * t * t + 0.984375
+
+
+def ease_elastic(t: float) -> float:
+    """Ease out with a springy settle."""
+    t = _clip(t)
+    if t in (0.0, 1.0):
+        return t
+    return 2 ** (-10 * t) * math.sin((t * 10 - 0.75) * (2 * math.pi / 3)) + 1
 
 
 def span(t: float, start: float, length: float) -> float:
@@ -396,6 +429,14 @@ class Film:
             put(fr, w["img"], w["x"], w["y"] - lift, alpha=a * ease(k * 3), scale=scale)
         elif self.p.words == "punch":
             put(fr, w["img"], w["x"], w["y"] - lift, alpha=a * ease(k * 2), scale=1 + 0.45 * (1 - ease_back(k)))
+        elif self.p.words == "drop":  # falls from above and bounces into place
+            put(fr, w["img"], w["x"], w["y"] - lift - 220 * (1 - ease_bounce(k)), alpha=a * ease(k * 3))
+        elif self.p.words == "wave":  # springs up from below with an elastic settle
+            put(fr, w["img"], w["x"], w["y"] - lift + 90 * (1 - ease_elastic(k)), alpha=a * ease(k * 2.5))
+        elif self.p.words == "zoom":  # scales up smoothly from small with a fade
+            put(fr, w["img"], w["x"], w["y"] - lift, alpha=a * ease(k * 2), scale=0.4 + 0.6 * ease(k))
+        elif self.p.words == "fade":  # a soft, elegant fade with a gentle lift
+            put(fr, w["img"], w["x"], w["y"] - lift + 24 * (1 - ease(k)), alpha=a * ease(k * 1.4))
         else:  # rise
             put(fr, w["img"], w["x"], w["y"] - lift + 50 * (1 - ease(k)), alpha=a * ease(k))
 

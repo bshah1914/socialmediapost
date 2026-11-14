@@ -76,6 +76,9 @@ STYLES: Final = (
     ("minimal", "Minimal (animated text)"), ("neon", "Neon (animated text)"),
     ("magazine", "Magazine (animated text)"), ("impact", "Impact (animated text)"),
     ("story", "Story (animated text)"), ("data", "Data (animated text)"),
+    ("bounce", "Bounce (animated text)"), ("spring", "Spring (animated text)"),
+    ("scale", "Scale (animated text)"), ("elegant", "Elegant (animated text)"),
+    ("pulse", "Pulse (animated text)"), ("matrix", "Matrix (animated text)"),
     *SIMPLE,
 )
 STYLE_IDS: Final = frozenset(k for k, _ in STYLES)
