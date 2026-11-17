@@ -311,7 +311,9 @@ class Film:
             self.scenes.append(("offer", q(2.6)))
         self.scenes.append(("cta", q(4.4)))
         self.length = sum(d for _, d in self.scenes)
-        self.cover_at = self.scenes[0][1] + self.scenes[1][1] - 0.2
+        # the grid thumbnail: the fully-built headline, after the words land but before the
+        # scene wipe (which starts 0.3s before the hook ends) — else the cover is a half-wiped panel
+        self.cover_at = self.scenes[0][1] + self.scenes[1][1] - 0.55
 
     # ---- prepared once
     def _layout(self) -> None:
