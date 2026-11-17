@@ -4,7 +4,9 @@ chooses among the best candidates; without one it follows the same rules."""
 
 from __future__ import annotations
 
+import json
 import logging
+import random
 import re
 from collections import Counter
 from typing import Any, Final
@@ -14,12 +16,22 @@ from technews.agents import llm, team
 
 logger = logging.getLogger(__name__)
 
+#: Each topic draws from a varied pool spanning the classic and the newer designs, so consecutive
+#: cards in the same category do not all look the same.
 SUITS: Final[dict[str, list[str]]] = {
-    "cloud": ["blueprint", "aurora", "stage"], "devops": ["console", "blueprint", "bento"], "ai": ["aurora", "stage", "bento"],
-    "hack": ["stage", "console", "impact"], "breach": ["impact", "stage", "console"], "vulnerability": ["impact", "console", "stage"],
-    "scam": ["impact", "horizon", "stage"], "outage": ["impact", "stage", "blueprint"], "bigtech": ["studio", "bento", "aurora"],
-    "launch": ["horizon", "studio", "bento"], "viral": ["horizon", "impact", "bento"], "policy": ["studio", "blueprint", "classic"],
-    "other": ["studio", "bento", "aurora", "stage"],
+    "cloud":         ["blueprint", "aurora", "wave", "cosmic", "stage", "blur"],
+    "devops":        ["console", "circuit", "blueprint", "stacked", "bento", "slash"],
+    "ai":            ["aurora", "neon", "cosmic", "stage", "blur", "retro"],
+    "hack":          ["impact", "slash", "gilded", "console", "frame", "stage"],
+    "breach":        ["impact", "slash", "gilded", "console", "frame"],
+    "vulnerability": ["impact", "console", "slash", "circuit", "stage"],
+    "scam":          ["impact", "horizon", "slash", "gilded", "stage"],
+    "outage":        ["impact", "slash", "stage", "blueprint", "console"],
+    "bigtech":       ["studio", "bento", "minimal", "frame", "stacked", "aurora"],
+    "launch":        ["horizon", "wave", "studio", "retro", "split", "bento"],
+    "viral":         ["horizon", "retro", "neon", "impact", "slash", "bento"],
+    "policy":        ["studio", "minimal", "blueprint", "frame", "classic"],
+    "other":         ["studio", "bento", "aurora", "wave", "minimal", "cosmic", "stage"],
 }  # fmt: skip
 HAS_NUMBER = re.compile(r"\d[\d,.]*\s?(?:%|[kKmMbB]\b|million|billion)")
 
@@ -31,6 +43,23 @@ def _learned() -> tuple[Counter[str], Counter[str]]:
             to[r["detail"].get("to", "")] += 1
             away[r["detail"].get("from", "")] += 1
     return to, away
+
+
+def _recent_layouts(n: int = 6) -> list[str]:
+    """Layouts the last few news cards used, newest first — so we can avoid repeating them."""
+    from technews import db
+    from technews.config import settings
+
+    out: list[str] = []
+    for r in db.rows("SELECT meta FROM posts WHERE brand_id = ? AND (flyer = '' OR flyer IS NULL) ORDER BY id DESC LIMIT ?",
+                     settings.BRAND_ID, n):
+        try:
+            lay = json.loads(r["meta"] or "{}").get("layout")
+        except (ValueError, TypeError):
+            lay = None
+        if lay:
+            out.append(str(lay))
+    return out
 
 
 def candidates(category: str, headline: str) -> list[str]:
@@ -52,16 +81,20 @@ def choose(story: dict[str, Any], headline: str, points: list[str]) -> dict[str,
         return {"layout": "", "reason": "designer is off", "by": "off"}
     with team.run("designer") as info:
         ranked = candidates(story.get("category", "other"), headline)
-        pick, reason, by = ranked[0], "suits the topic and your past choices", "rules"
+        # drop whatever the last few cards used, so the design keeps changing
+        recent = _recent_layouts()
+        fresh = [lay for lay in ranked if lay not in recent[:4]] or ranked
+        # rules pick: rotate among the strongest fresh options rather than always the top one
+        pick, reason, by = random.choice(fresh[:4]), "a fresh look that suits the topic", "rules"
         if llm.available():
             system = ("You are the DESIGNER agent of an Instagram news page. Pick ONE layout id for this news card from the candidates, "
-                      "for clarity and impact. Reply with JSON: {\"layout\": id, \"reason\": \"at most 12 words\"}.")
+                      "for clarity and impact. Prefer variety — do not always pick the same one. Reply with JSON: {\"layout\": id, \"reason\": \"at most 12 words\"}.")
             if book := team.playbook("designer"):
                 system += "\nYOUR PLAYBOOK (rules learned from the editor):\n" + book
             try:
-                reply = llm.chat_json(system=system, user=f"category: {story.get('category')}\nheadline: {headline}\npoints: {points}\ncandidates: {ranked}\n",
-                                      max_tokens=120, temperature=0.3)  # fmt: skip
-                if reply.data.get("layout") in ranked:
+                reply = llm.chat_json(system=system, user=f"category: {story.get('category')}\nheadline: {headline}\npoints: {points}\ncandidates: {fresh}\nrecently used (avoid): {recent[:4]}\n",
+                                      max_tokens=120, temperature=0.5)  # fmt: skip
+                if reply.data.get("layout") in fresh:
                     pick, reason, by = str(reply.data["layout"]), str(reply.data.get("reason", ""))[:120], reply.model
             except llm.LLMError as exc:
                 logger.warning("designer.llm_failed error=%s", str(exc)[:160])
