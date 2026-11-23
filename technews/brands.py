@@ -22,6 +22,8 @@ DEFAULT_ID: Final = 1
 FIELDS: Final = ("name", "handle", "ig_username", "ig_password", "hashtags", "email", "site", "categories", "posts_per_day", "enabled")
 KINDS: Final = ("news", "flyers", "ideas", "videos")
 NEW_KINDS: Final = "flyers,ideas,videos"  # a new business posts no tech news unless it is switched on
+# every table holding a business's own rows (a delete clears them all; a test keeps this list complete)
+OWNED_TABLES: Final = ("posts", "flyers", "ideas", "videos", "agent_runs", "feedback", "playbooks", "proposals", "followers")
 _CHAT = re.compile(r"^-?\d{3,20}$")
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -201,20 +203,24 @@ def save(brand_id: int | None, data: dict[str, Any]) -> int:
     name = str(data.get("name", "")).strip()
     if not name or len(name) > 60:
         raise ValueError("Give the brand a name (up to 60 characters)")
-    values = {
-        "name": name,
-        "handle": str(data.get("handle", "")).strip().lstrip("@")[:60],
-        "ig_username": str(data.get("ig_username", "")).strip().lstrip("@")[:60],
-        "hashtags": str(data.get("hashtags", "")).strip()[:400],
-        "email": str(data.get("email", "")).strip()[:120],
-        "site": str(data.get("site", "")).strip()[:120],
-        "categories": ",".join(c.strip().lower() for c in str(data.get("categories", "")).split(",") if c.strip())[:200],
-        "enabled": int(bool(data.get("enabled", True))),
-    }
-    try:
-        values["posts_per_day"] = max(0, min(50, int(data.get("posts_per_day") or 0)))
-    except (TypeError, ValueError):
-        raise ValueError("Posts per day is a whole number (0 uses the general limit)") from None
+    new = brand_id is None
+    given = lambda field: new or field in data  # noqa: E731 - a change names only the fields it changes; the rest are kept
+    values: dict[str, Any] = {"name": name}
+    for field, size in (("handle", 60), ("ig_username", 60)):
+        if given(field):
+            values[field] = str(data.get(field, "")).strip().lstrip("@")[:size]
+    for field, size in (("hashtags", 400), ("email", 120), ("site", 120)):
+        if given(field):
+            values[field] = str(data.get(field, "")).strip()[:size]
+    if given("categories"):
+        values["categories"] = ",".join(c.strip().lower() for c in str(data.get("categories", "")).split(",") if c.strip())[:200]
+    if given("enabled"):
+        values["enabled"] = int(bool(data.get("enabled", True)))
+    if given("posts_per_day"):
+        try:
+            values["posts_per_day"] = max(0, min(50, int(data.get("posts_per_day") or 0)))
+        except (TypeError, ValueError):
+            raise ValueError("Posts per day is a whole number (0 uses the general limit)") from None
     values.update(_profile({k: v for k, v in data.items() if k not in ("hashtags", "email", "site")}))
     values.update(_extras(data, new=brand_id is None))
     password = str(data.get("ig_password", "")).strip()
@@ -222,14 +228,20 @@ def save(brand_id: int | None, data: dict[str, Any]) -> int:
         values["ig_password"] = secretbox.seal(password)
         cols = list(values)
         return db.execute(f"INSERT INTO brands ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", *values.values())  # noqa: S608
-    if get(brand_id) is None:
+    before = get(brand_id)
+    if before is None:
         raise ValueError("No such brand")
     if password:  # a blank password keeps the saved one
         values["ig_password"] = secretbox.seal(password)
     if brand_id == DEFAULT_ID:
         values["enabled"] = 1  # the first brand cannot be switched off
+    turning_on = values.get("enabled") == 1 and not before["enabled"] and brand_id != DEFAULT_ID
+    if turning_on:  # switched on below, only once it passes the checks
+        del values["enabled"]
     sets = ", ".join(f"{k} = ?" for k in values)
     db.execute(f"UPDATE brands SET {sets} WHERE id = ?", *values.values(), brand_id)  # noqa: S608 - fixed column names
+    if turning_on:
+        switch_on(brand_id)  # the other changes are kept even when this says what is still missing
     return brand_id
 
 
@@ -270,10 +282,72 @@ def switch_on(brand_id: int) -> None:
     db.execute("UPDATE brands SET enabled = 1 WHERE id = ?", brand_id)
 
 
-def delete(brand_id: int) -> None:
+def switch_off(brand_id: int) -> None:
+    """Pause a business: nothing is posted for it and its people cannot work on it. Everything is kept."""
     if brand_id == DEFAULT_ID:
-        raise ValueError("The first brand cannot be removed")
-    if db.rows("SELECT id FROM posts WHERE brand_id = ? LIMIT 1", brand_id):
-        raise ValueError("This brand has posts. Switch it off instead of removing it.")
-    db.execute("DELETE FROM flyers WHERE brand_id = ?", brand_id)
-    db.execute("DELETE FROM brands WHERE id = ?", brand_id)
+        raise ValueError("The first business cannot be switched off")
+    if get(brand_id) is None:
+        raise ValueError("No such brand")
+    db.execute("UPDATE brands SET enabled = 0 WHERE id = ?", brand_id)
+
+
+def disconnect(brand_id: int) -> None:
+    """Forget a business's saved Instagram login (its username and password stay, to connect again)."""
+    if brand_id == DEFAULT_ID:
+        raise ValueError("The first business's Instagram is under Settings")
+    if get(brand_id) is None:
+        raise ValueError("No such brand")
+    session_path(brand_id).unlink(missing_ok=True)
+    db.execute("DELETE FROM kv WHERE key = ?", f"instagram:session_user{suffix(brand_id)}")
+
+
+def footprint(brand_id: int) -> dict[str, Any]:
+    """What deleting a business would take with it."""
+    brand = get(brand_id)
+    if brand is None:
+        raise ValueError("No such brand")
+    count = lambda table, where="brand_id = ?": int(db.rows(f"SELECT COUNT(*) AS n FROM {table} WHERE {where}", brand_id)[0]["n"])  # noqa: E731, S608
+    return {"name": brand["name"], "enabled": bool(brand["enabled"]), "posts": count("posts"), "flyers": count("flyers"),
+            "videos": count("videos"), "ideas": count("ideas"), "people": count("users", "brand_id = ? AND role != 'admin'")}  # fmt: skip
+
+
+def delete(brand_id: int, *, confirm: str) -> dict[str, Any]:
+    """Delete a business for good: its posts, flyers, ideas, videos, people, saved login and files.
+    It must be switched off first and its name typed; a backup of the database is taken before anything goes.
+    Raises ValueError with what to do."""
+    if brand_id == DEFAULT_ID:
+        raise ValueError("The first business (CloudTrio) cannot be deleted")
+    brand = get(brand_id)
+    if brand is None:
+        raise ValueError("No such brand")
+    if brand["enabled"]:
+        raise ValueError("Switch it off first, then delete it")
+    if " ".join(str(confirm or "").split()).lower() != " ".join(brand["name"].split()).lower():
+        raise ValueError(f"Type the business name ({brand['name']}) to delete it")
+    if db.rows("SELECT id FROM videos WHERE brand_id = ? AND status = 'working' LIMIT 1", brand_id):
+        raise ValueError("A video is being made for this business. Try again in a few minutes.")
+    from technews import analytics, backup, instagram, pipeline  # here, not at the top: they import this module
+    from technews.agents import analyst
+
+    removed = footprint(brand_id)
+    try:
+        taken = backup.run()
+    except Exception as exc:  # noqa: BLE001 - nothing is deleted without a copy
+        raise ValueError(f"Could not take a backup first, so nothing was deleted: {exc}") from exc
+    if taken.get("check") != "ok":
+        raise ValueError("The backup taken first did not check out, so nothing was deleted")
+    keys = [k + suffix(brand_id) for k in (pipeline.LAST_POST_KEY, analytics.INSIGHTS_KEY, analyst.REPORT_KEY, instagram.SESSION_USER_KEY,
+                                           instagram.RESTRICT_PAUSE_KEY, instagram.RESTRICTED_AT_KEY, instagram.LOGOUT_ALERT_KEY)]  # fmt: skip
+    posts = "SELECT id FROM posts WHERE brand_id = ?"
+    db.execute_all([
+        (f"DELETE FROM metrics WHERE post_id IN ({posts})", (brand_id,)),  # noqa: S608 - fixed SQL
+        (f"DELETE FROM notes WHERE post_id IN ({posts})", (brand_id,)),  # noqa: S608
+        *[(f"DELETE FROM {table} WHERE brand_id = ?", (brand_id,)) for table in OWNED_TABLES],  # noqa: S608 - fixed table names
+        ("DELETE FROM users WHERE brand_id = ? AND role != 'admin'", (brand_id,)),
+        (f"DELETE FROM kv WHERE key IN ({', '.join('?' * len(keys))})", tuple(keys)),  # noqa: S608
+        ("DELETE FROM brands WHERE id = ?", (brand_id,)),
+    ])  # fmt: skip
+    shutil.rmtree(settings.DATA_DIR / "brands" / str(brand_id), ignore_errors=True)
+    for old in (f"ig_session_{brand_id}.json", f"brand-logo-{brand_id}.png"):  # files kept at the old places
+        (settings.DATA_DIR / old).unlink(missing_ok=True)
+    return {"backup": taken["name"], "removed": removed}

@@ -382,6 +382,18 @@ def execute(sql: str, *params: Any) -> int:
         return conn.execute(sql, params).lastrowid or 0
 
 
+def execute_all(statements: list[tuple[str, tuple[Any, ...]]]) -> None:
+    """Run several statements as one: either all of them happen or none does."""
+    if postgres():
+        with _get_pool().connection() as conn, conn.transaction():
+            for sql, params in statements:
+                conn.execute(_translate(sql, bool(params))[0], params or None)
+        return
+    with connect() as conn:
+        for sql, params in statements:
+            conn.execute(sql, params)
+
+
 def story(story_id: int) -> dict[str, Any] | None:
     found = rows("SELECT * FROM stories WHERE id = ?", story_id)
     return found[0] if found else None

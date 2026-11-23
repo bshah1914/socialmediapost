@@ -149,3 +149,63 @@ def test_phone_width(sign_in, view):
     page.wait_for_timeout(300)
     width = page.evaluate("document.documentElement.scrollWidth")
     assert width <= 390, f"{view} scrolls sideways on a phone: {width}px"
+
+
+def test_admin_edits_switches_off_and_deletes_a_business(sign_in):
+    page = sign_in()
+    page.on("dialog", lambda d: d.accept())
+    bid = _business(page, "Gym Delete Test", about="A gym in Baroda that opens at six", hashtags="#gym", kinds="flyers,ideas", delivery="dry_run")
+    page.goto("/#businesses")
+    page.reload()  # the list was drawn before the business was added
+    card = page.locator(f'.brand-card[data-bid="{bid}"]')
+    card.locator("summary").click()
+    card.locator("[data-bchecks] li").first.wait_for()  # its readiness shows when it opens
+    card.get_by_label("What it does, who it is for, how it talks").fill("A gym in Baroda with morning classes for beginners")
+    card.get_by_label("Hashtags (up to 5 are used)").fill("#gym #baroda")
+    card.get_by_label("Its own recorded videos").check()
+    card.get_by_role("button", name="Save changes").click()
+    page.locator(f"#bmsg-{bid}").get_by_text("Saved.").wait_for()
+    saved = next(b for b in _api(page, "GET", "/api/brands")[1]["brands"] if b["id"] == bid)
+    assert saved["about"].startswith("A gym in Baroda with morning") and saved["hashtags"] == "#gym #baroda"
+    assert set(saved["kinds"].split(",")) == {"flyers", "ideas", "videos"} and saved["enabled"]
+
+    card = page.locator(f'.brand-card[data-bid="{bid}"]')  # drawn again after the save, still open
+    assert card.get_by_role("button", name="Delete…").is_disabled()  # it is on: switch it off first
+    card.get_by_role("button", name="Switch off").click()
+    page.locator(f"#bmsg-{bid}").get_by_text("Switched off.").wait_for()
+    card = page.locator(f'.brand-card[data-bid="{bid}"]')
+    card.get_by_role("button", name="Delete…").click()
+    card.locator("[data-bfoot]").get_by_text("Posts").wait_for()
+    go = card.get_by_role("button", name="Delete for good")
+    card.get_by_label("Type Gym Delete Test to confirm").fill("Gym")
+    assert go.is_disabled()
+    card.get_by_label("Type Gym Delete Test to confirm").fill("gym delete test")
+    assert go.is_enabled()
+    go.click()
+    page.locator("#biz-msg").get_by_text("Gym Delete Test was deleted.").wait_for()
+    assert all(b["id"] != bid for b in _api(page, "GET", "/api/brands")[1]["brands"])
+    page.wait_for_timeout(2700)  # the page reloads; the business is gone from the sidebar and the table too
+    page.locator("#biz-health tbody").get_by_text("CloudTrio").wait_for()
+    assert "Gym Delete Test" not in page.locator("#biz-health").inner_text()
+    assert page.locator("#brand-sw").count() == 0 or "Gym Delete Test" not in page.locator("#brand-sw").inner_text()
+
+
+def test_owner_edits_their_own_business(sign_in, tmp_path):
+    admin = sign_in()
+    bid = _business(admin, "Florist Owner Test", about="A florist in Nashik for weddings", hashtags="#flowers", kinds="flyers,ideas", delivery="dry_run")
+    assert _api(admin, "POST", "/api/users", {"username": "floristowner", "password": "Owner@12345", "role": "owner", "brand_id": bid})[0] == 200
+    owner = sign_in("floristowner", "Owner@12345")
+    assert owner.locator('#nav a[href="#businesses"]').count() == 0
+    owner.goto("/#mybusiness")
+    about = owner.get_by_label("What it does, who it is for, how it talks")
+    owner.wait_for_function("document.getElementById('my-about').value.length > 0")
+    assert about.input_value() == "A florist in Nashik for weddings"
+    about.fill("A florist in Nashik: wedding stages and bouquets to order")
+    logo = tmp_path / "florist.png"
+    Image.new("RGBA", (64, 64), "#e91e63").save(logo)
+    owner.get_by_label("Logo (PNG, up to 2 MB)").set_input_files(str(logo))
+    owner.get_by_role("button", name="Save").click()
+    owner.locator("#my-msg").get_by_text("Saved.").wait_for()
+    owner.locator("#my-logo-img:not([hidden])").wait_for()
+    saved = next(b for b in _api(admin, "GET", "/api/brands")[1]["brands"] if b["id"] == bid)
+    assert saved["about"].startswith("A florist in Nashik: wedding stages") and saved["logo"]

@@ -68,7 +68,7 @@ def create_app() -> Flask:
     # pages and calls only an admin may use, even just to look
     admin_only = frozenset({"api_users", "api_backups", "api_secrets_status", "api_settings", "api_brands", "api_sources", "api_scout",
                             "api_ig_login_status", "api_businesses_health", "api_brand_ready", "api_brand_enable", "api_brand_test_key",
-                            "api_brand_test_telegram"})  # fmt: skip
+                            "api_brand_test_telegram", "api_brand_footprint", "api_brand_disable", "api_brand_disconnect"})  # fmt: skip
     # a row named in the address must belong to the business that is open (or the person's own business)
     owned_by = {"post_id": "posts", "flyer_id": "flyers", "video_id": "videos"}
 
@@ -108,7 +108,7 @@ def create_app() -> Flask:
                "api_source_delete": "delete source", "api_account": "change own account", "api_users_add": "add person", "api_users_change": "change person",
                "api_users_delete": "remove person", "api_security_save": "change security", "api_backup_save": "change backups", "api_backup_now": "back up now",
                "api_rotate_token": "rotate token", "api_schedule": "schedule post", "api_unschedule": "unschedule post", "api_brands_save": "save brand", "api_agent_save": "change agent", "api_agent_run": "run agent", "api_create_generate": "create from idea", "api_create_send": "send idea to approvals", "api_scout_run": "find sources", "api_scout_idea": "decide source idea", "api_scout_auto": "change source scout", "api_proposal": "decide new rules", "api_agents_learning": "change auto-learn",
-               "api_brands_delete": "remove brand", "api_brand_profile": "change business profile", "api_videos_upload": "upload video", "api_video_make": "make video post", "api_video_cover": "change video cover", "api_video_delete": "remove video", "api_brand_logo": "brand logo", "api_brand_connect": "connect brand Instagram", "api_two_step_on": "turn on 2-step", "api_two_step_off": "turn off 2-step"}  # fmt: skip
+               "api_brands_delete": "delete business", "api_brand_disable": "switch business off", "api_brand_enable": "switch business on", "api_brand_disconnect": "disconnect business Instagram", "api_brand_profile": "change business profile", "api_videos_upload": "upload video", "api_video_make": "make video post", "api_video_cover": "change video cover", "api_video_delete": "remove video", "api_brand_logo": "brand logo", "api_brand_connect": "connect brand Instagram", "api_two_step_on": "turn on 2-step", "api_two_step_off": "turn off 2-step"}  # fmt: skip
 
     @app.after_request
     def audit_trail(resp: Any) -> Any:
@@ -524,6 +524,8 @@ def create_app() -> Flask:
             hidden.add("videos")
         if g.role != "admin":  # a business's own people never see the admin pages nor the other businesses
             hidden |= {"sources", "settings", "businesses"}
+        if g.role != "owner":  # an owner edits their own business there; admins use Businesses
+            hidden.add("mybusiness")
         shown = [b for b in brands.listing() if b["enabled"] and (g.role == "admin" or b["id"] == g.brand["id"])]
         return render_template("dashboard.html", brand_list=shown, brand_now=g.brand["id"], brand_name=g.brand["name"], nav_hide=hidden,
                                brand_site=settings.BRAND_SITE, brand_email=settings.BRAND_EMAIL, status=status(), stories=stories, posts=posts, pending=pending,
@@ -845,7 +847,15 @@ def create_app() -> Flask:
             brands.save_profile(g.brand["id"], request.get_json(silent=True) or {})
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
-        return jsonify({"brand": {k: v for k, v in brands.get(g.brand["id"]).items() if k not in ("ig_password", "nvidia_key")}})
+        return api_brand_profile_get()
+
+    @app.get("/api/brand/profile")
+    @admin
+    def api_brand_profile_get() -> Any:
+        """The open business's profile as its owner may see it (never its passwords or keys)."""
+        brand = brands.get(g.brand["id"]) or {}
+        shown = {k: brand.get(k, "") for k in ("id", "name", "about", "hashtags", "email", "site", "telegram_chat", "handle", "ig_username")}
+        return jsonify({"brand": {**shown, "colors": brands.colors(brand), "logo": brands.logo_path(brand["id"]).exists() if brand else False}})
 
     @app.get("/api/brands")
     @admin
@@ -865,11 +875,51 @@ def create_app() -> Flask:
     @app.delete("/api/brands/<int:brand_id>")
     @admin
     def api_brands_delete(brand_id: int) -> Any:
+        """Delete a business for good (switched off first, its name typed, a backup taken before)."""
         try:
-            brands.delete(brand_id)
+            out = brands.delete(brand_id, confirm=str((request.get_json(silent=True) or {}).get("confirm") or ""))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if session.get("brand") == brand_id:
+            session.pop("brand", None)
+        return jsonify({**out, "brands": brands.listing()})
+
+    @app.get("/api/brands/<int:brand_id>/footprint")
+    @admin
+    def api_brand_footprint(brand_id: int) -> Any:
+        try:
+            return jsonify(brands.footprint(brand_id))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 404
+
+    @app.post("/api/brands/<int:brand_id>/disable")
+    @admin
+    def api_brand_disable(brand_id: int) -> Any:
+        try:
+            brands.switch_off(brand_id)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify({"brands": brands.listing()})
+
+    @app.post("/api/brands/<int:brand_id>/disconnect")
+    @admin
+    def api_brand_disconnect(brand_id: int) -> Any:
+        try:
+            brands.disconnect(brand_id)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"brands": brands.listing()})
+
+    @app.get("/api/brands/<int:brand_id>/logo.png")
+    @admin
+    def api_brand_logo_file(brand_id: int) -> Any:
+        """A business's own logo (its own people, or an admin)."""
+        path = brands.logo_path(brand_id) if brand_id != brands.DEFAULT_ID and brands.get(brand_id) else None
+        if path is None or not path.exists():
+            return jsonify({"error": "No logo"}), 404
+        resp = send_file(io.BytesIO(path.read_bytes()), mimetype="image/png")
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     @app.post("/api/brands/<int:brand_id>/logo")
     @admin
