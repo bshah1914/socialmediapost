@@ -122,3 +122,36 @@ def template(story: dict[str, Any], *, angle: str = "", notes: list[str] | None 
         lines += [angle, ""]
     lines += ["What do you think? Tell us below 👇", "", f"Source: {story['source']}"]
     return Draft(title, points, "\n".join(lines), _tags(None, story["category"]), "template", notes or [])
+
+
+# --------------------------------------------------------------------------- a business's own video
+
+VIDEO_SYSTEM: Final = (
+    "You write the Instagram caption for a business's own video. Use ONLY facts from the LINE about the video and the "
+    "BUSINESS profile; never invent prices, numbers, names, awards or promises. Plain, warm, specific words that sound like "
+    "a person, not an advert. A hook line, one or two short lines, then a call to action with the contact. No hashtags. "
+    'Reply with JSON {"caption": "..."}'
+)
+_HASHTAG = re.compile(r"(?<![\w&])#\w+")
+
+
+def video_caption(about: str, title: str = "") -> str:
+    """The caption for a video post: from the line given (and the business profile), with the business's hashtags (5 at most).
+    Without an AI model, the line itself and the contact."""
+    from technews import flyers
+
+    line = (about or title).strip()
+    contact = settings.BRAND_EMAIL or settings.BRAND_SITE
+    text = f"{line}\n\nTalk to us: {contact}" if contact else line
+    if llm.available() and line:
+        user = f"BUSINESS: {settings.BRAND_NAME}. {settings.BRAND_ABOUT}\nCONTACT: {contact}\nLINE: {line}" + (f"\nTITLE: {title}" if title and title != line else "")
+        try:
+            reply = llm.chat_json(system=VIDEO_SYSTEM, user=user, max_tokens=400, temperature=0.6)
+            written = _HASHTAG.sub("", str(reply.data.get("caption") or ""))
+            written = "\n".join(re.sub(r"[ \t]{2,}", " ", part).strip() for part in written.splitlines()).strip()
+            if written:
+                text = written[:1800]
+        except llm.LLMError as exc:
+            logger.warning("writer.video_caption_failed error=%s", str(exc)[:160])
+    tags = " ".join([w for w in flyers.hashtags().split() if w.startswith("#")][: settings.HASHTAG_LIMIT])
+    return f"{text}\n\n{tags}".strip()

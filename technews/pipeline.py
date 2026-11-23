@@ -456,12 +456,39 @@ def draft_video(video_id: int, mp4: Path, cover: Path) -> int:
     row = videos.get(video_id)
     opts = videos.Options.from_dict(json.loads(row["options"] or "{}"))
     headline = (opts.title_text or opts.about or Path(row["original_name"]).stem or "Our video").strip()[:120]
-    caption = f"{opts.about.strip() or headline}\n\n{flyers.hashtags()}"
-    meta = json.dumps({"reel": {"video": mp4.name, "cover": cover.name, "style": "upload"}, "video_id": video_id})
-    post_id = _save_draft(0, headline, caption, cover, "video", "", meta)
+    caption = writer.video_caption(opts.about or headline, opts.title_text)
+    warnings = editor.review(headline, [], caption, {"title": opts.about or headline, "summary": f"{opts.about} {opts.title_text} {settings.BRAND_ABOUT}"})
+    if opts.as_post:  # a photo post: one frame of the finished video, in the feed's 4:5
+        at = (opts.cover_at if opts.cover_at is not None else (opts.start + opts.end) / 2) - opts.start
+        image = videos.frame_jpg(mp4, at, mp4.with_name(mp4.stem + "-post.jpg"), size=(1080, 1350))
+        meta = json.dumps({"video_id": video_id, "warnings": warnings})
+        post_id = _save_draft(0, headline, caption, image, "video", "", meta)
+        media, kind = image, "video post"
+    else:
+        meta = json.dumps({"reel": {"video": mp4.name, "cover": cover.name, "style": "upload"}, "video_id": video_id, "warnings": warnings})
+        post_id = _save_draft(0, headline, caption, cover, "video", "", meta)
+        media, kind = mp4, "video reel"
     db.execute("UPDATE videos SET post_id = ? WHERE id = ?", post_id, video_id)
-    notify.draft_ready(headline, "video reel", mp4, post_id=post_id)
+    notify.draft_ready(headline, kind, media, post_id=post_id)
     return post_id
+
+
+def video_cover(video_id: int, at: float) -> dict[str, Any]:
+    """Another cover for a video Reel still waiting: the frame at ``at`` seconds of the original video's timeline."""
+    from technews import videos
+
+    row = videos.get(video_id)
+    found = db.rows("SELECT * FROM posts WHERE id = ? AND status = 'pending'", row["post_id"]) if row["post_id"] else []
+    if not found or not reel_of(found[0]):
+        return {"ok": False, "reason": "that Reel is not waiting for approval"}
+    post, meta = found[0], draft_meta(found[0])
+    opts = videos.Options.from_dict(json.loads(row["options"] or "{}"))
+    at = min(max(float(at), opts.start), opts.end or float(row["seconds"]))
+    mp4 = settings.CARDS_DIR / meta["reel"]["video"]
+    cover = videos.frame_jpg(mp4, at - opts.start, mp4.with_name(f"{mp4.stem}-cover-{int(time.time() * 1000)}.jpg"))
+    meta["reel"]["cover"] = cover.name
+    db.execute("UPDATE posts SET meta = ?, image_path = ? WHERE id = ?", json.dumps(meta), str(cover), post["id"])
+    return {"ok": True, "cover": cover.name}
 
 
 def draft_flyer(flyer: flyers.Flyer | None = None, *, tags: str | None = None, for_reel: bool = False) -> dict[str, Any]:
@@ -624,6 +651,8 @@ def _approve(post_id: int, caption: str | None = None) -> dict[str, Any]:
         )  # fmt: skip
         if post["story_id"]:
             db.update_story(post["story_id"], status="posted")
+        if video_id := draft_meta(post).get("video_id"):  # its original is kept 30 days more, then cleared
+            db.execute("UPDATE videos SET posted_at = ? WHERE id = ?", db.now(), int(video_id))
         db.kv_set(LAST_POST_KEY + brands.suffix(), datetime.now(UTC).isoformat())
         logger.info("pipeline.approved post=%s via=%s linkedin=%s", post_id, result["delivered"], shared or "off")
         out = {"posted": True, "post_id": post_id, "linkedin": shared, **result}

@@ -21,7 +21,7 @@ from flask import Flask, abort, g, jsonify, redirect, render_template, request, 
 from flask.sessions import SecureCookieSessionInterface
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from technews import analytics, auth, backup, brands, card, config, db, devices, festivals, flyers, instagram, linkedin, monitor, motion, notify, pipeline, push, scheduler, secretbox, sources, sso, users
+from technews import analytics, auth, backup, brands, card, config, db, devices, festivals, flyers, instagram, linkedin, monitor, motion, notify, pipeline, push, scheduler, secretbox, sources, sso, users, videos
 from technews.agents import advice, analyst, creator, llm, scout, team, trainer
 from technews.config import settings
 
@@ -43,7 +43,8 @@ def create_app() -> Flask:
     brands.seed()
     app.secret_key = auth.secret_key()
     app.session_interface = _Sessions()
-    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=timedelta(hours=12))
+    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+                      MAX_CONTENT_LENGTH=330_000_000)  # a 300 MB video and the form around it
     if os.environ.get("BEHIND_PROXY") == "1":  # a reverse proxy (Caddy, nginx) terminates HTTPS in front of the app
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)  # type: ignore[method-assign]
     config.seal_env()
@@ -106,7 +107,7 @@ def create_app() -> Flask:
                "api_source_delete": "delete source", "api_account": "change own account", "api_users_add": "add person", "api_users_change": "change person",
                "api_users_delete": "remove person", "api_security_save": "change security", "api_backup_save": "change backups", "api_backup_now": "back up now",
                "api_rotate_token": "rotate token", "api_schedule": "schedule post", "api_unschedule": "unschedule post", "api_brands_save": "save brand", "api_agent_save": "change agent", "api_agent_run": "run agent", "api_create_generate": "create from idea", "api_create_send": "send idea to approvals", "api_scout_run": "find sources", "api_scout_idea": "decide source idea", "api_scout_auto": "change source scout", "api_proposal": "decide new rules", "api_agents_learning": "change auto-learn",
-               "api_brands_delete": "remove brand", "api_brand_profile": "change business profile", "api_brand_logo": "brand logo", "api_brand_connect": "connect brand Instagram", "api_two_step_on": "turn on 2-step", "api_two_step_off": "turn off 2-step"}  # fmt: skip
+               "api_brands_delete": "remove brand", "api_brand_profile": "change business profile", "api_videos_upload": "upload video", "api_video_make": "make video post", "api_video_cover": "change video cover", "api_video_delete": "remove video", "api_brand_logo": "brand logo", "api_brand_connect": "connect brand Instagram", "api_two_step_on": "turn on 2-step", "api_two_step_off": "turn off 2-step"}  # fmt: skip
 
     @app.after_request
     def audit_trail(resp: Any) -> Any:
@@ -1175,6 +1176,104 @@ def create_app() -> Flask:
                                         as_reel=body.get("as") == "reel", style=str(body.get("style") or ""), track=str(body.get("track") or "")))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+
+    # ----------------------------------------------------------------- a business's own recorded videos
+
+    @app.errorhandler(413)
+    def too_big(_exc: Any) -> Any:
+        return jsonify({"error": "The video is over 300 MB.", "message": "The video is over 300 MB."}), 413
+
+    def videos_off() -> Any:
+        if not brands.has("videos", g.brand):
+            return jsonify({"error": "Videos are switched off for this business.", "message": "Videos are switched off for this business."}), 403
+        return None
+
+    @app.post("/api/videos")
+    @admin
+    def api_videos_upload() -> Any:
+        if (off := videos_off()) is not None:
+            return off
+        upload = request.files.get("file")
+        if upload is None or not upload.filename:
+            return jsonify({"error": "Choose a video file (MP4 or MOV)."}), 400
+        try:
+            row = videos.save_upload(upload.stream, upload.filename)
+        except videos.VideoError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"video": row, "frames": videos.frames(row["id"])})
+
+    @app.get("/api/videos")
+    @admin
+    def api_videos() -> Any:
+        return jsonify({"videos": videos.listing() if brands.has("videos", g.brand) else []})
+
+    @app.get("/api/videos/<int:video_id>")
+    @admin
+    def api_video(video_id: int) -> Any:
+        try:
+            return jsonify({"video": videos.get(video_id), "frames": videos.frames(video_id)})
+        except videos.VideoError as exc:
+            return jsonify({"error": str(exc)}), 404
+
+    @app.get("/api/videos/<int:video_id>/source")
+    @admin
+    def api_video_source(video_id: int) -> Any:
+        """The uploaded video, for the trim player (seekable)."""
+        try:
+            path = videos.folder() / videos.get(video_id)["stored"]
+        except videos.VideoError:
+            abort(404)
+        if not path.is_file():
+            abort(404)
+        return send_file(path, conditional=True, max_age=0)
+
+    @app.get("/api/videos/<int:video_id>/frame.jpg")
+    @admin
+    def api_video_frame(video_id: int) -> Any:
+        """A preview of one moment of the video, to choose the cover."""
+        try:
+            row = videos.get(video_id)
+            at = float(request.args.get("at") or 0)
+            out = videos.frame_jpg(videos.folder() / row["stored"], at, videos.folder() / f"preview-{video_id}.jpg", size=(540, 960))
+        except (videos.VideoError, ValueError):
+            abort(404)
+        return send_file(out, mimetype="image/jpeg", max_age=0)
+
+    @app.post("/api/videos/<int:video_id>/make")
+    @admin
+    def api_video_make(video_id: int) -> Any:
+        if (off := videos_off()) is not None:
+            return off
+        try:
+            row = videos.queue(video_id, videos.Options.from_dict(request.get_json(silent=True) or {}))
+        except (videos.VideoError, ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"video": row})
+
+    @app.post("/api/videos/<int:video_id>/cover")
+    @admin
+    def api_video_cover(video_id: int) -> Any:
+        try:
+            out = pipeline.video_cover(video_id, float((request.get_json(silent=True) or {}).get("at") or 0))
+        except (videos.VideoError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(out) if out["ok"] else (jsonify({"error": out["reason"]}), 400)
+
+    @app.post("/api/videos/<int:video_id>/delete")
+    @admin
+    def api_video_delete(video_id: int) -> Any:
+        """Remove an upload that is not waiting in Approvals or posted."""
+        try:
+            row = videos.get(video_id)
+        except videos.VideoError as exc:
+            return jsonify({"error": str(exc)}), 404
+        post = db.rows("SELECT status FROM posts WHERE id = ?", row["post_id"]) if row["post_id"] else []
+        if post and post[0]["status"] in ("pending", "scheduled", "posted"):
+            return jsonify({"error": "Its post is waiting or posted. Reject it first, or keep it."}), 400
+        if row["stored"]:
+            (videos.folder() / row["stored"]).unlink(missing_ok=True)
+        db.execute("DELETE FROM videos WHERE id = ?", video_id)
+        return jsonify({"videos": videos.listing()})
 
     @app.get("/api/create/history")
     @admin

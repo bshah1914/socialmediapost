@@ -1,6 +1,7 @@
 """Shared test setup: every test runs on its own empty data folder and database, never the real ones."""
 
 import os
+import subprocess
 
 import pytest
 
@@ -75,3 +76,45 @@ def approved_story():
 
 
 SOURDOUGH = {"kicker": "NEW", "headline": "Sourdough every Sunday", "points": ["Baked at 6am"], "cta": "Visit us", "caption": "Fresh bread", "enabled": True}
+
+
+# --------------------------------------------------------------------------- tiny test videos (made with ffmpeg once per run)
+
+
+def _clip(path, size, *, audio=True, seconds=3):
+    cmd = [_ffmpeg(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"testsrc=size={size}:rate=30"]
+    if audio:
+        cmd += ["-f", "lavfi", "-i", "sine=frequency=440"]
+    cmd += ["-t", str(seconds), "-c:v", "libx264", "-pix_fmt", "yuv420p"] + (["-c:a", "aac"] if audio else []) + [str(path)]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return path
+
+
+@pytest.fixture(scope="session")
+def clips(tmp_path_factory):
+    d = tmp_path_factory.mktemp("clips")
+    return {"landscape": _clip(d / "land.mp4", "640x360"), "silent": _clip(d / "silent.mp4", "640x360", audio=False),
+            "portrait": _clip(d / "port.mp4", "360x640")}
+
+
+@pytest.fixture
+def clip_landscape(clips):
+    return clips["landscape"]
+
+
+@pytest.fixture
+def clip_silent(clips):
+    return clips["silent"]
+
+
+@pytest.fixture
+def clip_portrait(clips):
+    return clips["portrait"]
+
+
+
+
+def _ffmpeg():
+    from technews import motion
+
+    return motion.ffmpeg()
