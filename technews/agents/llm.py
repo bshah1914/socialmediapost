@@ -109,6 +109,20 @@ def _extras(model: str) -> dict[str, Any]:
     return {}
 
 
+def check_key(key: str) -> tuple[bool, str]:
+    """Try one tiny request with this key only (no other key, no second AI service). Returns (worked, what happened)."""
+    from technews import config
+
+    if not key.strip():
+        return False, "No key given."
+    with config.override({**(config.current_override() or {}), "NVIDIA_API_KEY": key.strip(), "LLM2_API_KEY": ""}):
+        try:
+            reply = chat_json(system='Reply with {"ok": true}.', user="ping", max_tokens=20)
+        except LLMError as exc:
+            return False, str(exc)[:300]
+    return True, f"{reply.model} answered in {reply.latency_ms} ms"
+
+
 def chat_json(*, system: str, user: str, max_tokens: int = 2000, temperature: float = 0.2) -> ChatResult:
     """The first model in the chain that answers with a JSON object."""
     if not available():

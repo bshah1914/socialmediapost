@@ -21,7 +21,7 @@ from flask import Flask, abort, g, jsonify, redirect, render_template, request, 
 from flask.sessions import SecureCookieSessionInterface
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from technews import analytics, auth, backup, brands, card, config, db, devices, festivals, flyers, instagram, linkedin, monitor, motion, notify, pipeline, push, scheduler, sources, sso, users
+from technews import analytics, auth, backup, brands, card, config, db, devices, festivals, flyers, instagram, linkedin, monitor, motion, notify, pipeline, push, scheduler, secretbox, sources, sso, users
 from technews.agents import advice, analyst, creator, llm, scout, team, trainer
 from technews.config import settings
 
@@ -902,6 +902,67 @@ def create_app() -> Flask:
             except instagram.InstagramPublishError as exc:
                 return jsonify({"state": "error", "message": str(exc)}), 409
         return jsonify(job.as_dict())
+
+    # ----------------------------------------------------------------- onboarding a business (admins)
+
+    @app.get("/api/brands/<int:brand_id>/ready")
+    @admin
+    def api_brand_ready(brand_id: int) -> Any:
+        try:
+            checks = brands.readiness(brand_id)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 404
+        return jsonify({"checks": checks, "ready": all(c["ok"] for c in checks if c["required"])})
+
+    @app.post("/api/brands/<int:brand_id>/enable")
+    @admin
+    def api_brand_enable(brand_id: int) -> Any:
+        try:
+            brands.switch_on(brand_id)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"brands": brands.listing()})
+
+    @app.post("/api/brands/<int:brand_id>/test-key")
+    @admin
+    def api_brand_test_key(brand_id: int) -> Any:
+        """Try a business's NVIDIA key: the one typed in, or the one saved."""
+        brand = brands.get(brand_id)
+        if brand is None:
+            return jsonify({"ok": False, "message": "No such business."}), 404
+        typed = str((request.get_json(silent=True) or {}).get("key") or "").strip()
+        saved = settings.NVIDIA_API_KEY if brand_id == brands.DEFAULT_ID else secretbox.reveal(brand.get("nvidia_key") or "")
+        ok, message = llm.check_key(typed or saved)
+        return jsonify({"ok": ok, "message": message})
+
+    @app.post("/api/brands/<int:brand_id>/test-telegram")
+    @admin
+    def api_brand_test_telegram(brand_id: int) -> Any:
+        """A test message to the business's own Telegram chat (only that chat)."""
+        brand = brands.get(brand_id)
+        if brand is None:
+            return jsonify({"ok": False, "message": "No such business."}), 404
+        chat = str(brand.get("telegram_chat") or "").strip()
+        if not (settings.TELEGRAM_BOT_TOKEN and chat):
+            return jsonify({"ok": False, "message": "Set the bot under Settings and this business's chat id first."}), 400
+        try:
+            notify._telegram(notify.title("test message", brand_id), "If you can read this, this business's alerts reach this chat.", None, chat=chat)
+        except Exception as exc:  # noqa: BLE001 - shown to the admin
+            return jsonify({"ok": False, "message": str(exc)[:200]})
+        return jsonify({"ok": True, "message": "Sent."})
+
+    @app.get("/api/businesses/health")
+    @admin
+    def api_businesses_health() -> Any:
+        """How each business is doing, for the Businesses table."""
+        out = []
+        for b in brands.listing():
+            with brands.use(b["id"]):
+                out.append({"id": b["id"], "name": b["name"], "enabled": b["enabled"], "delivery": settings.IG_DELIVERY,
+                            "instagram": b["connected"] or "", "ai_key": bool(settings.NVIDIA_API_KEY),
+                            "last_post_at": db.kv_get(pipeline.LAST_POST_KEY + brands.suffix(b["id"])) or "",
+                            "waiting": pipeline.pending_count(), "kinds": sorted(brands.kinds(b))})  # fmt: skip
+        return jsonify({"businesses": out})
 
     @app.post("/api/posts/<int:post_id>/rewrite")
     @admin

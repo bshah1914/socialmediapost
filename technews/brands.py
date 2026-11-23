@@ -244,6 +244,32 @@ def save_profile(brand_id: int, data: dict[str, Any]) -> int:
     return brand_id
 
 
+def readiness(brand_id: int) -> list[dict[str, Any]]:
+    """What a business still needs before it can be switched on. ``required`` items must all be ``ok``."""
+    brand = get(brand_id)
+    if brand is None:
+        raise ValueError("No such brand")
+    first = brand_id == DEFAULT_ID  # CloudTrio runs on the general settings and the built-in logo
+    instagram = bool(session_user(brand_id)) or brand.get("delivery") == "dry_run" or (first and settings.IG_SESSION_PATH.exists())
+    key = bool(settings.NVIDIA_API_KEY) if first else bool(brand.get("nvidia_key"))
+    return [
+        {"key": "profile", "label": "What the business does (a sentence or two)", "ok": bool(brand["name"]) and len((brand.get("about") or "").strip()) >= 20, "required": True},
+        {"key": "kinds", "label": "What it posts", "ok": bool(kinds(brand)), "required": True},
+        {"key": "logo", "label": "Logo", "ok": first or logo_path(brand_id).exists(), "required": True},
+        {"key": "instagram", "label": "Instagram connected (or trial run)", "ok": instagram, "required": True},
+        {"key": "ai_key", "label": "Its own NVIDIA key (without one, captions use templates)", "ok": key, "required": False},
+        {"key": "hashtags", "label": "Hashtags", "ok": bool((brand.get("hashtags") or (settings.FLYER_HASHTAGS if first else "")).strip()), "required": True},
+    ]  # fmt: skip
+
+
+def switch_on(brand_id: int) -> None:
+    """Switch a business on once every required check passes. Raises ValueError naming what is missing."""
+    missing = [i["label"] for i in readiness(brand_id) if i["required"] and not i["ok"]]
+    if missing:
+        raise ValueError("Not ready: " + "; ".join(missing))
+    db.execute("UPDATE brands SET enabled = 1 WHERE id = ?", brand_id)
+
+
 def delete(brand_id: int) -> None:
     if brand_id == DEFAULT_ID:
         raise ValueError("The first brand cannot be removed")

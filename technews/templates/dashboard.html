@@ -190,6 +190,12 @@
   .chip[aria-pressed="true"] { background:var(--brand); color:var(--brand-ink); border-color:var(--brand); }
   .chip small { opacity:.75; margin-left:4px; }
 
+  .ob-steps { list-style:none; display:flex; flex-wrap:wrap; gap:6px; padding:0; margin:8px 0 4px; }
+  .ob-steps li { font-size:.82em; padding:4px 10px; border:1px solid var(--line); border-radius:999px; color:var(--muted); }
+  .ob-steps li span { font-weight:700; }
+  .ob-steps li[aria-current="step"] { background:var(--brand); color:var(--brand-ink); border-color:var(--brand); }
+  .ob-steps li.done { color:var(--text); }
+  .ob-pane fieldset { border:0; padding:0; margin:8px 0 0; } .ob-pane legend { font-weight:600; margin-bottom:4px; }
   .table { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); }
   table { width:100%; border-collapse:collapse; min-width:820px; }
   caption { text-align:left; padding:12px 14px; color:var(--muted); font-size:.86em; }
@@ -1320,13 +1326,60 @@
         </div>
         {% if role == 'admin' %}
         <div class="card">
-          <h2>Brands</h2>
-          <p class="sub">Each brand is its own page: its own Instagram account, flyers, posts, hashtags and daily limit. Pick the brand in the sidebar to work on it. A story goes to the first brand whose tags include it (leave the tags empty to take every story). The first brand uses the general settings on this page.</p>
+          <h2>Businesses</h2>
+          <p class="sub">Each business is kept apart: its own Instagram account, AI key, files, posts, hashtags, voice and daily limit. Pick the business in the sidebar to work on it. The first business uses the general settings on this page.</p>
+          <div class="table" style="margin:10px 0 14px"><table id="biz-health" aria-label="How each business is doing" style="min-width:640px">
+            <thead><tr><th scope="col">Business</th><th scope="col">On</th><th scope="col">Posting</th><th scope="col">Instagram</th><th scope="col">AI key</th><th scope="col">Waiting</th><th scope="col">Last post</th></tr></thead>
+            <tbody></tbody></table></div>
           <div id="br-list"></div>
-          <h3 style="margin:14px 0 0;font-size:1em">Add a brand</h3>
-          <label for="br-name">Name</label><input id="br-name" type="text" maxlength="60">
-          <div class="row"><button class="btn" type="button" onclick="addBrand()">Add brand</button></div>
           <div id="br-msg" class="msg" role="status" aria-live="polite"></div>
+        </div>
+        <div class="card" id="onboard">
+          <h2>Add a business</h2>
+          <p class="sub">Seven short steps. Each one is saved as you go, and the business stays off until the last step says it is ready.</p>
+          <ol class="ob-steps" aria-label="Steps">{% for n, l in [(1,'Profile'),(2,'What it posts'),(3,'Logo and colours'),(4,'Instagram'),(5,'AI key'),(6,'Hashtags and alerts'),(7,'Ready?')] %}<li data-obstep="{{ n }}"><span>{{ n }}</span> {{ l }}</li>{% endfor %}</ol>
+          <section class="ob-pane" data-obpane="1">
+            <label for="ob-name">Business name</label><input id="ob-name" type="text" maxlength="60" autocomplete="organization">
+            <label for="ob-about">What it does, who it is for, how it talks</label>
+            <textarea id="ob-about" class="f" maxlength="1500" placeholder="For example: a family bakery in Pune since 1998. Sourdough and cakes to order. Warm, simple words, no hype."></textarea>
+          </section>
+          <section class="ob-pane" data-obpane="2" hidden>
+            <fieldset><legend>It posts</legend>
+              <label class="switch"><input type="checkbox" data-obkind="flyers" checked> Flyers about its offers</label>
+              <label class="switch"><input type="checkbox" data-obkind="ideas" checked> Posts and Reels from ideas</label>
+              <label class="switch"><input type="checkbox" data-obkind="videos" checked> Its own recorded videos</label>
+              <label class="switch"><input type="checkbox" data-obkind="news"> Tech news (like CloudTrio)</label>
+            </fieldset>
+          </section>
+          <section class="ob-pane" data-obpane="3" hidden>
+            <label for="ob-logo">Logo (PNG, up to 2 MB)</label><input id="ob-logo" type="file" accept="image/png">
+            <div class="row"><label for="ob-bg">Background</label><input id="ob-bg" type="color" value="#0b1f3a"><label for="ob-accent">Accent</label><input id="ob-accent" type="color" value="#f5a524"></div>
+          </section>
+          <section class="ob-pane" data-obpane="4" hidden>
+            <label for="ob-handle">Handle on the posts</label><input id="ob-handle" type="text" maxlength="60" placeholder="@yourpage">
+            <label for="ob-iguser">Instagram username</label><input id="ob-iguser" type="text" maxlength="60" autocomplete="off">
+            <label for="ob-igpass">Instagram password</label><input id="ob-igpass" type="password" autocomplete="new-password" placeholder="blank keeps the saved one">
+            <label class="switch"><input type="checkbox" id="ob-dry"> Trial run: make the posts but never put them on Instagram</label>
+            <div class="row"><button class="btn ghost" type="button" id="ob-connect">Connect Instagram</button></div>
+          </section>
+          <section class="ob-pane" data-obpane="5" hidden>
+            <label for="ob-key">Its own NVIDIA key</label><input id="ob-key" type="password" autocomplete="off" placeholder="nvapi-… (blank keeps the saved one)">
+            <p class="muted">Without a key this business still works: its captions come from templates instead of the AI. It never uses another business's key.</p>
+            <div class="row"><button class="btn ghost" type="button" id="ob-testkey">Test the key</button></div>
+          </section>
+          <section class="ob-pane" data-obpane="6" hidden>
+            <label for="ob-tags">Hashtags (up to 5 are used)</label><input id="ob-tags" type="text" maxlength="400" placeholder="#bakery #pune #sourdough">
+            <label for="ob-ppd">Posts per day (0 uses the general limit)</label><input id="ob-ppd" type="number" min="0" max="50" value="0">
+            <label for="ob-chat">This business's own Telegram chat id (optional)</label><input id="ob-chat" type="text" inputmode="numeric" placeholder="-1001234567890">
+            <p class="muted">Your admin chat always gets every business's alerts. This chat gets only this business's.</p>
+            <div class="row"><button class="btn ghost" type="button" id="ob-testchat">Send a test message</button></div>
+          </section>
+          <section class="ob-pane" data-obpane="7" hidden>
+            <ul class="list" id="ob-checks" aria-label="Readiness"></ul>
+            <div class="row"><button class="btn" type="button" id="ob-on">Switch on</button></div>
+          </section>
+          <div class="row"><button class="btn ghost" type="button" id="ob-back" hidden>Back</button><button class="btn" type="button" id="ob-next">Save and continue</button></div>
+          <div id="ob-msg" class="msg" role="status" aria-live="polite"></div>
         </div>
         {% endif %}
         <div class="card">
@@ -2468,13 +2521,15 @@
   window.addEventListener("hashchange", () => { if (location.hash === "#calendar") drawCalendar(); });
   if (location.hash === "#calendar") drawCalendar();
 
-  const BRAND_FIELDS = [["handle", "Handle on the cards"], ["ig_username", "Instagram username"], ["hashtags", "Hashtags"], ["email", "Contact email"], ["site", "Website"], ["categories", "News tags it posts (comma separated, empty is all)"]];
+  const BRAND_FIELDS = [["about", "What it does, who it is for, how it talks"], ["kinds", "What it posts (news, flyers, ideas, videos)"], ["handle", "Handle on the cards"], ["ig_username", "Instagram username"], ["hashtags", "Hashtags"], ["email", "Contact email"], ["site", "Website"], ["categories", "News tags it posts (comma separated, empty is all)"], ["telegram_chat", "Its own Telegram chat id (optional)"]];
   let brandTags = [];
   function drawBrands(list) {
     $("br-list").innerHTML = list.map((b) => `<details class="brand-card" data-bid="${b.id}"><summary><b>${esc(b.name)}</b> ${b.id === 1 ? "· first brand" : ""} ${b.enabled ? "" : "· off"} ${b.connected ? "· @" + esc(b.connected) : ""}</summary>
       <label>Name</label><input data-f="name" value="${esc(b.name)}" maxlength="60">
       ${b.id === 1 ? '<p class="muted">The first brand uses the general settings (Instagram, hashtags, contact) on this page.</p>' : BRAND_FIELDS.map(([k, label]) => `<label>${label}</label><input data-f="${k}" value="${esc(b[k] || "")}">`).join("") +
         `<label>Instagram password ${b.ig_password_set ? "(saved)" : "(not set)"}</label><input data-f="ig_password" type="password" autocomplete="new-password" placeholder="blank keeps the saved password">
+         <label>Its own NVIDIA key ${b.nvidia_key_set ? "(saved)" : "(not set: captions use templates)"}</label><input data-f="nvidia_key" type="password" autocomplete="off" placeholder="blank keeps the saved key">
+         <label class="switch"><input data-f="delivery" data-on="dry_run" type="checkbox" ${b.delivery === "dry_run" ? "checked" : ""}> Trial run (never posts to Instagram)</label>
          <label>Posts per day (0 uses the general limit)</label><input data-f="posts_per_day" type="number" min="0" max="50" value="${b.posts_per_day || 0}">
          <label class="switch"><input data-f="enabled" type="checkbox" ${b.enabled ? "checked" : ""}> Active</label>
          <label>Logo (PNG)</label><input type="file" accept="image/png" data-logo="${b.id}">`}
@@ -2482,16 +2537,11 @@
         ${b.id === 1 ? "" : `<button class="btn ghost" type="button" data-bconn="${b.id}">Connect Instagram</button><button class="btn ghost" type="button" data-bdel="${b.id}">Remove</button>`}</div></details>`).join("");
   }
   async function loadBrands() { if (!$("br-list")) return; const [ok, d] = await api("/api/brands"); if (ok) { brandTags = d.tags; drawBrands(d.brands); } }
-  async function addBrand() {
-    const [ok, d] = await api("/api/brands", { name: $("br-name").value });
-    if (!ok) { say("br-msg", d.error || d.message || "Failed", false); return; }
-    $("br-name").value = ""; drawBrands(d.brands); say("br-msg", "Added. Open it to set its Instagram account, then Connect Instagram.", true);
-  }
   document.addEventListener("click", async (e) => {
     const t = e.target.closest("button[data-bsave], button[data-bconn], button[data-bdel]"); if (!t) return;
     const card = t.closest(".brand-card"), id = +card.dataset.bid;
     if (t.dataset.bsave) {
-      const body = { id }; card.querySelectorAll("[data-f]").forEach((el) => (body[el.dataset.f] = el.type === "checkbox" ? el.checked : el.value));
+      const body = { id }; card.querySelectorAll("[data-f]").forEach((el) => (body[el.dataset.f] = el.type === "checkbox" ? (el.dataset.on ? (el.checked ? el.dataset.on : "") : el.checked) : el.value));
       const [ok, d] = await api("/api/brands", body);
       if (!ok) { say("br-msg", d.error || d.message || "Failed", false); return; }
       const logo = card.querySelector("[data-logo]");
@@ -2506,6 +2556,59 @@
     }
   });
   loadBrands();
+
+  /* ---- businesses: how each is doing, and onboarding a new one in seven steps */
+  async function loadHealth() {
+    const tb = document.querySelector("#biz-health tbody"); if (!tb) return;
+    const [ok, d] = await api("/api/businesses/health"); if (!ok) return;
+    tb.innerHTML = d.businesses.map((b) => `<tr><td data-label="Business"><b>${esc(b.name)}</b></td><td data-label="On">${b.enabled ? "Yes" : "No"}</td>
+      <td data-label="Posting">${b.delivery === "instagram" ? "Live" : "Trial run"}</td><td data-label="Instagram">${b.instagram ? "@" + esc(b.instagram) : "not connected"}</td>
+      <td data-label="AI key">${b.ai_key ? "Own key" : "Templates"}</td><td data-label="Waiting">${b.waiting}</td>
+      <td data-label="Last post">${b.last_post_at ? esc(b.last_post_at.slice(0, 16).replace("T", " ")) + " UTC" : "never"}</td></tr>`).join("");
+  }
+  const OB = { id: 0, step: 1 };
+  function obBody() {
+    return { id: OB.id || undefined, name: $("ob-name").value, about: $("ob-about").value, enabled: false,
+      kinds: [...document.querySelectorAll("[data-obkind]")].filter((c) => c.checked).map((c) => c.dataset.obkind),
+      colors: { bg: $("ob-bg").value, accent: $("ob-accent").value }, handle: $("ob-handle").value, ig_username: $("ob-iguser").value,
+      ig_password: $("ob-igpass").value, delivery: $("ob-dry").checked ? "dry_run" : "", nvidia_key: $("ob-key").value,
+      hashtags: $("ob-tags").value, posts_per_day: $("ob-ppd").value, telegram_chat: $("ob-chat").value };
+  }
+  function obShow(n) {
+    OB.step = n;
+    document.querySelectorAll("[data-obpane]").forEach((p) => (p.hidden = +p.dataset.obpane !== n));
+    document.querySelectorAll("[data-obstep]").forEach((s) => { const k = +s.dataset.obstep; s.classList.toggle("done", k < n);
+      if (k === n) s.setAttribute("aria-current", "step"); else s.removeAttribute("aria-current"); });
+    $("ob-back").hidden = n === 1; $("ob-next").hidden = n === 7;
+    if (n === 7) obChecks();
+  }
+  async function obSave() {
+    const [ok, d] = await api("/api/brands", obBody());
+    if (!ok) { say("ob-msg", d.error || d.message || "Not saved", false); return false; }
+    OB.id = d.id; $("ob-igpass").value = ""; $("ob-key").value = "";
+    const logo = $("ob-logo"); if (logo.files[0]) { const fd = new FormData(); fd.append("logo", logo.files[0]);
+      const r = await fetch(`/api/brands/${OB.id}/logo`, { method: "POST", body: fd, headers: tokenHeaders() });
+      if (!r.ok) { say("ob-msg", (await r.json()).error || "The logo was not saved.", false); return false; } logo.value = ""; }
+    drawBrands(d.brands); loadHealth(); return true;
+  }
+  async function obChecks() {
+    if (!OB.id) return;
+    const [ok, d] = await api(`/api/brands/${OB.id}/ready`); if (!ok) return;
+    $("ob-checks").innerHTML = d.checks.map((c) => `<li><span class="k">${c.ok ? "✓" : c.required ? "✗" : "–"} ${esc(c.label)}</span><span class="v">${c.ok ? "done" : c.required ? "needed" : "optional"}</span></li>`).join("");
+    $("ob-on").disabled = !d.ready;
+  }
+  if ($("onboard")) {
+    obShow(1);
+    $("ob-next").onclick = async () => { if (await obSave()) { say("ob-msg", "Saved.", true); obShow(OB.step + 1); } };
+    $("ob-back").onclick = () => obShow(OB.step - 1);
+    $("ob-connect").onclick = async () => { if (!(await obSave())) return; const [ok, d] = await api(`/api/brands/${OB.id}/connect`, {}); say("ob-msg", d.message || "Connecting…", ok && d.state !== "error"); };
+    $("ob-testkey").onclick = async () => { if (!OB.id && !(await obSave())) return; const [, d] = await api(`/api/brands/${OB.id}/test-key`, { key: $("ob-key").value }); say("ob-msg", d.message || "No answer", !!d.ok); };
+    $("ob-testchat").onclick = async () => { if (!(await obSave())) return; const [, d] = await api(`/api/brands/${OB.id}/test-telegram`, {}); say("ob-msg", d.message || "No answer", !!d.ok); };
+    $("ob-on").onclick = async () => { const [ok, d] = await api(`/api/brands/${OB.id}/enable`, {});
+      say("ob-msg", ok ? "Switched on. Pick it in the sidebar to start working on it." : d.error || "Not ready", ok);
+      if (ok) { drawBrands(d.brands); loadHealth(); setTimeout(() => location.reload(), 1200); } };
+    loadHealth();
+  }
 
   (function () { const h = new Date().getHours(), g = h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening", el = document.getElementById("greet");
     if (el) el.textContent = g + ", " + el.textContent.replace(/^Welcome back, /, ""); })();

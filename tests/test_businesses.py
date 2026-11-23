@@ -118,3 +118,81 @@ def test_business_voice_in_brief():
 
 def test_cloudtrio_brief_unchanged():
     assert creator._business().startswith(f"{settings.BRAND_NAME}. Website {settings.BRAND_SITE}")
+
+
+# --------------------------------------------------------------------------- onboarding a business, and how each one is doing
+
+from conftest import client_as  # noqa: E402
+from technews import notify  # noqa: E402
+
+
+def _logo(bid):
+    from PIL import Image
+
+    Image.new("RGBA", (4, 4), "#123456").save(brands.logo_path(bid), "PNG")
+
+
+def test_new_business_not_ready_until_complete():
+    bid = make_brand("Bakery", enabled=False)
+    missing = {i["key"] for i in brands.readiness(bid) if i["required"] and not i["ok"]}
+    assert missing == {"profile", "logo", "instagram", "hashtags"}
+    with pytest.raises(ValueError, match="Not ready: "):
+        brands.switch_on(bid)
+    assert brands.get(bid)["enabled"] == 0
+
+
+def test_ready_in_dry_run_without_key():
+    bid = make_brand("Bakery", about="Family bakery in Pune since 1998", hashtags="#bread", delivery="dry_run", enabled=False)
+    _logo(bid)
+    brands.switch_on(bid)
+    assert brands.get(bid)["enabled"] == 1
+    key = next(i for i in brands.readiness(bid) if i["key"] == "ai_key")
+    assert key["ok"] is False and key["required"] is False
+
+
+def test_switch_on_from_the_console():
+    bid = make_brand("Bakery", enabled=False)
+    admin = client_as("boss", "Admin@1234")
+    out = admin.post(f"/api/brands/{bid}/enable")
+    assert out.status_code == 400 and "Not ready" in out.get_json()["error"]
+    assert {i["key"] for i in admin.get(f"/api/brands/{bid}/ready").get_json()["checks"]} == {"profile", "kinds", "logo", "instagram", "ai_key", "hashtags"}
+
+
+def test_onboarding_is_for_admins_only():
+    bid = make_brand("Bakery")
+    owner = client_as("baker", "Pass@1234", "owner", bid)
+    assert owner.get(f"/api/brands/{bid}/ready").status_code == 403
+    assert owner.post(f"/api/brands/{bid}/enable").status_code == 403
+    assert owner.post(f"/api/brands/{bid}/test-key", json={"key": "x"}).status_code == 403
+    assert owner.get("/api/businesses/health").status_code == 403
+
+
+def test_test_key_uses_only_that_key(monkeypatch):
+    seen = []
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY", "nvapi-cloudtrio")
+
+    def fake(**kw):
+        seen.append((settings.NVIDIA_API_KEY, settings.LLM2_API_KEY))
+        raise llm.LLMError("401 unauthorized")
+
+    monkeypatch.setattr(llm, "chat_json", fake)
+    ok, message = llm.check_key("nvapi-new")
+    assert not ok and "401" in message and seen == [("nvapi-new", "")]
+    assert settings.NVIDIA_API_KEY == "nvapi-cloudtrio"
+
+
+def test_test_telegram_goes_to_the_business_chat_only(monkeypatch):
+    bid = make_brand("Bakery", telegram_chat="-1002")
+    got = []
+    monkeypatch.setattr(notify, "_telegram", lambda title, text, image, post_id=0, markup="", chat="": got.append((chat, title)))
+    monkeypatch.setattr(settings, "TELEGRAM_BOT_TOKEN", "t")
+    out = client_as("boss", "Admin@1234").post(f"/api/brands/{bid}/test-telegram").get_json()
+    assert out["ok"] and got == [("-1002", "Bakery: test message")]
+
+
+def test_health_lists_every_business():
+    make_brand("Bakery", delivery="dry_run")
+    rows = client_as("boss", "Admin@1234").get("/api/businesses/health").get_json()["businesses"]
+    assert [r["name"] for r in rows][:2] == ["CloudTrio", "Bakery"]
+    assert set(rows[1]) >= {"id", "name", "enabled", "delivery", "instagram", "ai_key", "last_post_at", "waiting"}
+    assert rows[1]["delivery"] == "dry_run" and rows[1]["ai_key"] is False
