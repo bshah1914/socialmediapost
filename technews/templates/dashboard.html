@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>CloudTrio Newsroom</title>
+<title>{{ brand_name }} · socialmediapost</title>
 <link rel="icon" href="/static/logo-mark.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#091a36">
@@ -604,12 +604,12 @@
   <aside aria-label="Sidebar">
     <div class="brand">
       <img src="/static/logo-mark.png" alt="">
-      <div><b>Cloud<span>Trio</span></b><small>NEWSROOM</small></div>
+      <div><b>{{ brand_name }}</b><small>SOCIALMEDIAPOST</small></div>
     </div>
     {% if brand_list|length > 1 %}<label class="sr" for="brand-sw">Brand</label>
     <select id="brand-sw" class="brand-sw" onchange="switchBrand(this.value)">{% for b in brand_list %}<option value="{{ b.id }}" {{ 'selected' if b.id == brand_now }}>{{ b.name }}</option>{% endfor %}</select>{% endif %}
     <nav aria-label="Dashboard sections" id="nav">
-      {% for key, label in [('overview','Overview'),('approvals','Approvals'),('reels','Reels'),('posts','Posts'),('analytics','Analytics'),('stories','Stories'),('create','Create'),('agents','Agents'),('calendar','Calendar'),('flyers','Flyers'),('sources','Sources'),('settings','Settings')] %}
+      {% for key, label in [('overview','Overview'),('approvals','Approvals'),('reels','Reels'),('posts','Posts'),('analytics','Analytics'),('stories','Stories'),('create','Create'),('agents','Agents'),('calendar','Calendar'),('flyers','Flyers'),('sources','Sources'),('settings','Settings')] if key not in nav_hide %}
       {% if key == 'create' %}<span class="nav-label">Plan and manage</span>{% endif %}
       <a href="#{{ key }}" data-view="{{ key }}" class="{{ 'sec' if key in ('analytics','create','agents','calendar','flyers','sources','settings') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{{ icons[key]|safe }}</svg><span class="lbl">{{ label }}</span>{% if key == 'approvals' and status.pending %}<span class="badge" aria-label="{{ status.pending }} waiting">{{ status.pending }}</span>{% endif %}{% if key == 'reels' and status.reels_pending %}<span class="badge" aria-label="{{ status.reels_pending }} reels waiting">{{ status.reels_pending }}</span>{% endif %}</a>
       {% endfor %}
@@ -619,7 +619,7 @@
       <div class="live"><span class="dot {{ '' if status.scheduler else 'off' }}" aria-hidden="true"></span>
         <span>{{ "Scheduler running" if status.scheduler else "Scheduler off" }}</span></div>
       <div>Instagram: <b>{{ "@" ~ status.instagram_user if status.instagram_user else "not connected" }}</b></div>
-      <div>cloudtrio.in · info@cloudtrio.in</div>
+      <div>{{ brand_site }} · {{ brand_email }}</div>
       <div class="devline" title="Detected from your browser">This device: <b>{{ device.label }}</b></div>
       <form method="post" action="/logout" style="display:flex;gap:8px;align-items:center;justify-content:space-between">
         <span>Signed in as <b>{{ user }}</b></span><button class="btn ghost sm" type="submit">Sign out</button></form>
@@ -628,7 +628,7 @@
 
   <div id="more" role="dialog" aria-label="More sections">
     <div class="links">
-      {% for key, label in [('analytics','Analytics'),('create','Create'),('agents','Agents'),('flyers','Flyers'),('calendar','Calendar'),('sources','Sources'),('settings','Settings')] %}
+      {% for key, label in [('analytics','Analytics'),('create','Create'),('agents','Agents'),('flyers','Flyers'),('calendar','Calendar'),('sources','Sources'),('settings','Settings')] if key not in nav_hide %}
       <a href="#{{ key }}" data-view="{{ key }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{{ icons[key]|safe }}</svg>{{ label }}</a>
       {% endfor %}
     </div>
@@ -637,7 +637,7 @@
   </div>
 
   <main id="content" tabindex="-1">
-    <div class="m-brand"><img src="/static/logo-mark.png" alt=""><b>Cloud<span>Trio</span></b>
+    <div class="m-brand"><img src="/static/logo-mark.png" alt=""><b>{{ brand_name }}</b>
       {% if brand_list|length > 1 %}<label class="sr" for="m-sw">Brand</label><select id="m-sw" class="m-sw" onchange="switchBrand(this.value)">{% for b in brand_list %}<option value="{{ b.id }}" {{ 'selected' if b.id == brand_now }}>{{ b.name }}</option>{% endfor %}</select>{% endif %}</div>
     <header class="top">
       <div>
@@ -650,8 +650,8 @@
         </div>
       </div>
       <div class="tools" role="toolbar" aria-label="Page controls">
-        <button class="btn ghost" id="b-scan" type="button" onclick="runJob('/api/cycle?post=0', this)">Scan &amp; review</button>
-        <button class="btn" id="b-cycle" type="button" onclick="runJob('/api/cycle', this)">Run full cycle</button>
+        {% if role == 'admin' %}<button class="btn ghost" id="b-scan" type="button" onclick="runJob('/api/cycle?post=0', this)">Scan &amp; review</button>
+        <button class="btn" id="b-cycle" type="button" onclick="runJob('/api/cycle', this)">Run full cycle</button>{% endif %}
         <button class="btn ghost" id="install" type="button" hidden onclick="installApp()">Install app</button>
         <button class="btn ghost icon-btn" type="button" id="size" aria-label="Change text size" title="Text size">Aa</button>
         <button class="btn ghost icon-btn" type="button" id="theme" aria-label="Switch light or dark theme" title="Theme">◐</button>
@@ -1355,7 +1355,7 @@
           <label for="tm-pass">Starting password (at least 8 characters)</label><input id="tm-pass" type="password" autocomplete="new-password">
           <label for="tm-email">Google email (optional, lets them use Sign in with Google)</label><input id="tm-email" type="email" autocomplete="off" placeholder="name@company.com">
           <label for="tm-role">Role</label>
-          <select id="tm-role"><option value="approver">Approver</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
+          <select id="tm-role"><option value="owner">Owner</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
           <div class="row"><button class="btn" type="button" onclick="addPerson()">Add person</button></div>
           <div id="tm-msg" class="msg" role="status" aria-live="polite"></div>
           <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
@@ -1587,6 +1587,7 @@
 <script id="data" type="application/json">{{ insights|tojson }}</script>
 <script>
   const D = JSON.parse(document.getElementById("data").textContent);
+  const BRAND_NAME = {{ brand_name|tojson }};
   const THEMES = {{ flyer_themes|tojson }}, PALETTES = {{ flyer_palettes|tojson }}, PENDING_META = {{ pending_meta|tojson }};
   const REEL_STYLE_LABELS = { {% for k, l in reel_styles %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
   const REEL_TRACK_LABELS = { {% for k, l in reel_tracks %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
@@ -1635,7 +1636,7 @@
     document.querySelectorAll("main > section").forEach((s) => (s.hidden = s.dataset.view !== v));
     document.querySelectorAll("#nav a, #more a").forEach((a) => (a.dataset.view === v ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
     $("view-title").textContent = TITLES[v][0]; $("view-sub").textContent = TITLES[v][1];
-    document.title = (PENDING ? "(" + PENDING + ") " : "") + TITLES[v][0] + " · CloudTrio Newsroom";
+    document.title = (PENDING ? "(" + PENDING + ") " : "") + TITLES[v][0] + " · " + BRAND_NAME;
     const sec = ["analytics", "create", "agents", "calendar", "flyers", "sources", "settings"].includes(v);
     sec ? $("more-btn").setAttribute("aria-current", "page") : $("more-btn").removeAttribute("aria-current");
     toggleMore(false);
@@ -1942,7 +1943,7 @@
     if (PENDING) document.title = "(" + PENDING + ") " + document.title;
     const last = Number(store.get("seenPending") || "0"); store.set("seenPending", String(PENDING));
     if (PENDING > last && "Notification" in window && Notification.permission === "granted") {
-      const n = new Notification("CloudTrio: " + PENDING + " post" + (PENDING === 1 ? "" : "s") + " waiting for approval", { body: "Open Approvals to review.", icon: "/static/logo-mark.png" });
+      const n = new Notification(BRAND_NAME + ": " + PENDING + " post" + (PENDING === 1 ? "" : "s") + " waiting for approval", { body: "Open Approvals to review.", icon: "/static/logo-mark.png" });
       n.onclick = () => { focus(); location.hash = "approvals"; };
     }
   })();
@@ -2254,7 +2255,7 @@
   }
   function drawTeam(list) {
     $("tm-list").innerHTML = list.map((u) => `<li><span class="k"><b>${esc(u.username)}</b> ${u.two_step ? "· 2-step on" : ""} ${u.active ? "" : "· blocked"}${u.email ? `<br><span style="font-size:.85em">${esc(u.email)}</span>` : ""}</span>
-      <span class="v"><select data-uid="${u.id}" data-f="role" aria-label="Role of ${esc(u.username)}">${["admin", "approver", "viewer"].map((r) => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select>
+      <span class="v"><select data-uid="${u.id}" data-f="role" aria-label="Role of ${esc(u.username)}">${["admin", "owner", "viewer"].map((r) => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select>
       <button class="btn ghost sm" type="button" data-uid="${u.id}" data-act="block">${u.active ? "Block" : "Unblock"}</button>
       <button class="btn ghost sm" type="button" data-uid="${u.id}" data-act="pw">New password</button>
       <button class="btn ghost sm" type="button" data-uid="${u.id}" data-email="${esc(u.email || "")}" data-act="email">Google email</button>

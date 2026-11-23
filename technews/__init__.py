@@ -57,10 +57,18 @@ def create_app() -> Flask:
     if settings.SCHEDULER_ENABLED and not reloader_parent and os.environ.get("TECHNEWS_CLI") != "1":
         scheduler.start()
 
-    # approvers may decide and edit waiting posts; viewers only look; everything else is for admins
-    approver_ok = frozenset({"api_approve", "api_reject", "api_post_design", "api_post_rewrite", "api_flyer_preview", "api_flyer_suggest", "api_note_add", "api_post_reel", "api_schedule", "api_unschedule", "api_brand_switch", "api_agents", "api_suggestion_used", "api_create_generate", "api_create_send",
-                             "api_push_subscribe", "api_push_unsubscribe", "api_account", "api_two_step_start", "api_two_step_on",
-                             "api_two_step_off"})  # fmt: skip
+    # owners decide and edit their own business's waiting posts and make new ones; viewers only look;
+    # everything else is for admins, who see every business
+    owner_ok = frozenset({"api_approve", "api_reject", "api_post_design", "api_post_rewrite", "api_flyer_preview", "api_flyer_suggest", "api_note_add", "api_post_reel", "api_schedule", "api_unschedule", "api_brand_switch", "api_agents", "api_suggestion_used", "api_create_generate", "api_create_send",
+                          "api_push_subscribe", "api_push_unsubscribe", "api_account", "api_two_step_start", "api_two_step_on",
+                          "api_two_step_off", "api_brand_profile", "api_brand_connect", "api_brand_logo",
+                          "api_videos_upload", "api_video_make", "api_video_cover", "api_video_delete"})  # fmt: skip
+    # pages and calls only an admin may use, even just to look
+    admin_only = frozenset({"api_users", "api_backups", "api_secrets_status", "api_settings", "api_brands", "api_sources", "api_scout",
+                            "api_ig_login_status", "api_businesses_health", "api_brand_ready", "api_brand_enable", "api_brand_test_key",
+                            "api_brand_test_telegram"})  # fmt: skip
+    # a row named in the address must belong to the business that is open (or the person's own business)
+    owned_by = {"post_id": "posts", "flyer_id": "flyers", "video_id": "videos"}
 
     def current_user() -> dict[str, Any] | None:
         who = users.get(session["uid"]) if session.get("uid") else None
@@ -84,9 +92,9 @@ def create_app() -> Flask:
         if (g.user and not g.user["totp"] and not session.get("via_google") and users.two_step_mode() == "required" and request.method not in ("GET", "HEAD")
                 and not (request.endpoint or "").startswith("api_two_step") and request.endpoint != "logout"):  # fmt: skip
             return jsonify({"message": "Set up 2-step sign-in first (Settings, Security).", "error": "Set up 2-step sign-in first (Settings, Security)."}), 403
-        if g.role != "admin" and request.endpoint in {"api_users", "api_backups", "api_secrets_status"}:
+        if g.role != "admin" and request.endpoint in admin_only:
             return jsonify({"message": "Admins only.", "error": "Admins only."}), 403
-        if request.method not in ("GET", "HEAD") and g.role != "admin" and request.endpoint not in approver_ok | {"logout"}:
+        if request.method not in ("GET", "HEAD") and g.role != "admin" and request.endpoint not in owner_ok | {"logout"}:
             return jsonify({"message": f"Your role ({g.role}) cannot do this. Ask an admin.", "error": "Your role cannot do this. Ask an admin."}), 403
         if g.role == "viewer" and request.method not in ("GET", "HEAD") and request.endpoint not in {"logout", "api_account", "api_brand_switch", "api_push_subscribe", "api_push_unsubscribe", "api_flyer_preview", "api_flyer_suggest"}:
             return jsonify({"message": "Viewers can look but not change.", "error": "Viewers can look but not change."}), 403
@@ -98,7 +106,7 @@ def create_app() -> Flask:
                "api_source_delete": "delete source", "api_account": "change own account", "api_users_add": "add person", "api_users_change": "change person",
                "api_users_delete": "remove person", "api_security_save": "change security", "api_backup_save": "change backups", "api_backup_now": "back up now",
                "api_rotate_token": "rotate token", "api_schedule": "schedule post", "api_unschedule": "unschedule post", "api_brands_save": "save brand", "api_agent_save": "change agent", "api_agent_run": "run agent", "api_create_generate": "create from idea", "api_create_send": "send idea to approvals", "api_scout_run": "find sources", "api_scout_idea": "decide source idea", "api_scout_auto": "change source scout", "api_proposal": "decide new rules", "api_agents_learning": "change auto-learn",
-               "api_brands_delete": "remove brand", "api_brand_logo": "brand logo", "api_brand_connect": "connect brand Instagram", "api_two_step_on": "turn on 2-step", "api_two_step_off": "turn off 2-step"}  # fmt: skip
+               "api_brands_delete": "remove brand", "api_brand_profile": "change business profile", "api_brand_logo": "brand logo", "api_brand_connect": "connect brand Instagram", "api_two_step_on": "turn on 2-step", "api_two_step_off": "turn off 2-step"}  # fmt: skip
 
     @app.after_request
     def audit_trail(resp: Any) -> Any:
@@ -115,14 +123,30 @@ def create_app() -> Flask:
 
     @app.before_request
     def pick_brand() -> Any:
-        """Everything the dashboard shows or does is for the brand chosen in the sidebar."""
+        """Everything the dashboard shows or does is for one business: the one an admin chose in the sidebar,
+        or, for everyone else, their own (whatever the session or the page says)."""
         if not g.get("authed"):
             return None
-        brand = brands.get(int(session.get("brand") or brands.DEFAULT_ID))
-        if brand is None or not brand["enabled"]:
-            brand = brands.get(brands.DEFAULT_ID)
+        if g.role != "admin":
+            brand = brands.get(int(g.user["brand_id"] or 0)) if g.get("user") else None
+            if brand is None or not brand["enabled"]:
+                if request.endpoint in PUBLIC_ENDPOINTS or request.endpoint == "logout":
+                    return None
+                return jsonify({"message": "Your business is switched off. Ask an admin.", "error": "Your business is switched off. Ask an admin."}), 403
+        else:
+            brand = brands.get(int(session.get("brand") or brands.DEFAULT_ID))
+            if brand is None or not brand["enabled"]:
+                brand = brands.get(brands.DEFAULT_ID)
         g.brand = brand
         g.brand_token = config.set_override(brands.overrides(brand)) if brand else None
+        args = request.view_args or {}
+        if brand and g.role != "admin" and "brand_id" in args and args["brand_id"] != brand["id"]:
+            return jsonify({"message": "Not found.", "error": "Not found"}), 404
+        for arg, table in owned_by.items():
+            if brand and arg in args:
+                found = db.rows(f"SELECT brand_id FROM {table} WHERE id = ?", args[arg])  # noqa: S608 - fixed table names
+                if found and found[0]["brand_id"] != brand["id"]:
+                    return jsonify({"message": "Not found.", "error": "Not found"}), 404
         return None
 
     @app.teardown_request
@@ -264,7 +288,8 @@ def create_app() -> Flask:
     def api_users_add() -> Any:
         body = request.get_json(silent=True) or {}
         try:
-            uid = users.create(str(body.get("username", "")), str(body.get("password", "")), str(body.get("role", "viewer")))
+            uid = users.create(str(body.get("username", "")), str(body.get("password", "")), str(body.get("role", "viewer")),
+                               int(body.get("brand_id") or g.brand["id"]))  # a person joins the business that is open unless told
             if body.get("email"):
                 users.set_email(uid, str(body["email"]))
         except ValueError as exc:
@@ -276,7 +301,8 @@ def create_app() -> Flask:
     def api_users_change(user_id: int) -> Any:
         body = request.get_json(silent=True) or {}
         try:
-            users.change(user_id, role=body.get("role"), active=body.get("active"), password=body.get("password") or None)
+            users.change(user_id, role=body.get("role"), active=body.get("active"), password=body.get("password") or None,
+                         brand_id=int(body["brand_id"]) if body.get("brand_id") else None)
             if body.get("reset_two_step"):
                 users.set_totp(user_id, "")
             if "email" in body:
@@ -478,7 +504,8 @@ def create_app() -> Flask:
 
     @app.get("/")
     def dashboard() -> str:
-        stories = db.rows("SELECT * FROM stories ORDER BY found_at DESC, scan_score DESC LIMIT 150")
+        news_on = brands.has("news", g.brand)
+        stories = db.rows("SELECT * FROM stories ORDER BY found_at DESC, scan_score DESC LIMIT 150") if news_on else []
         posts = db.rows("SELECT p.*, s.title, s.url FROM posts p LEFT JOIN stories s ON s.id = p.story_id "
                         "WHERE p.status NOT IN ('pending', 'scheduled') AND p.brand_id = ? ORDER BY p.created_at DESC LIMIT 30", settings.BRAND_ID)  # fmt: skip
         pending = db.rows("SELECT p.*, s.url, s.category FROM posts p LEFT JOIN stories s ON s.id = p.story_id "
@@ -487,7 +514,12 @@ def create_app() -> Flask:
         pending_still = [p for p in pending if not (pending_meta.get(p["id"]) or {}).get("reel", {}).get("video")]
         pending_reel  = [p for p in pending if     (pending_meta.get(p["id"]) or {}).get("reel", {}).get("video")]
         posts_meta = {p["id"]: pipeline.draft_meta(p) for p in posts}
-        return render_template("dashboard.html", brand_list=[b for b in brands.listing() if b["enabled"]], brand_now=g.brand["id"], status=status(), stories=stories, posts=posts, pending=pending,
+        hidden = set() if news_on else {"stories"}
+        if g.role != "admin":  # a business's own people never see the admin pages nor the other businesses
+            hidden |= {"sources", "settings"}
+        shown = [b for b in brands.listing() if b["enabled"] and (g.role == "admin" or b["id"] == g.brand["id"])]
+        return render_template("dashboard.html", brand_list=shown, brand_now=g.brand["id"], brand_name=g.brand["name"], nav_hide=hidden,
+                               brand_site=settings.BRAND_SITE, brand_email=settings.BRAND_EMAIL, status=status(), stories=stories, posts=posts, pending=pending,
                                pending_still=pending_still, pending_reel=pending_reel,
                                insights=insights(), flyer_layouts=flyers.LAYOUTS, reels_ok=motion.available(), reel_styles=motion.STYLES, reel_tracks=motion.TRACKS, reel_frames=motion.FRAMES,
                                pending_meta=pending_meta, posts_meta=posts_meta,
@@ -789,12 +821,24 @@ def create_app() -> Flask:
     @app.post("/api/brand")
     @admin
     def api_brand_switch() -> Any:
-        """Choose which brand the dashboard shows."""
+        """Choose which brand the dashboard shows (admins; everyone else only ever has their own)."""
         brand = brands.get(int((request.get_json(silent=True) or {}).get("id") or 0))
+        if g.role != "admin" and (brand is None or brand["id"] != g.brand["id"]):
+            return jsonify({"error": "You can only open your own business."}), 403
         if brand is None or not brand["enabled"]:
             return jsonify({"error": "No such brand"}), 400
         session["brand"] = brand["id"]
         return jsonify({"brand": brand["id"]})
+
+    @app.post("/api/brand/profile")
+    @admin
+    def api_brand_profile() -> Any:
+        """The open business's profile: what it does, hashtags, contact, colours, its Telegram chat."""
+        try:
+            brands.save_profile(g.brand["id"], request.get_json(silent=True) or {})
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"brand": {k: v for k, v in brands.get(g.brand["id"]).items() if k not in ("ig_password", "nvidia_key")}})
 
     @app.get("/api/brands")
     @admin

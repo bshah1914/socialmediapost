@@ -1,4 +1,4 @@
-"""People who can sign in: a role each (admin, approver or viewer), an optional authenticator-app
+"""People who can sign in: a role each (admin for every business; owner or viewer of one business), an optional authenticator-app
 code (2-step sign-in, free, no service needed), and an audit log of who did what."""
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from technews import db, secretbox
 
-ROLES: Final = ("admin", "approver", "viewer")
+ROLES: Final = ("admin", "owner", "viewer")
+ALIASES: Final = {"approver": "owner"}  # the old name of the owner role
 MIN_PASSWORD: Final = 8
 TWO_STEP_KEY: Final = "security:two_step"  # off | optional | required (set on the dashboard)
 ISSUER: Final = "CloudTrio Newsroom"
@@ -37,7 +38,8 @@ def _password(password: str) -> str:
 
 
 def migrate() -> None:
-    """The old single account becomes the first admin."""
+    """The old single account becomes the first admin; old approvers become owners of the first business."""
+    db.execute("UPDATE users SET role = 'owner', brand_id = 1 WHERE role = 'approver'")
     if db.rows("SELECT id FROM users LIMIT 1"):
         return
     legacy_hash, legacy_user = db.kv_get("auth:hash"), db.kv_get("auth:user")
@@ -47,7 +49,7 @@ def migrate() -> None:
 
 
 def listing() -> list[dict[str, Any]]:
-    return [{**{k: u[k] for k in ("id", "username", "role", "created_at")}, "active": bool(u["active"]), "two_step": bool(u["totp"]), "email": u["email"]}
+    return [{**{k: u[k] for k in ("id", "username", "role", "created_at", "brand_id")}, "active": bool(u["active"]), "two_step": bool(u["totp"]), "email": u["email"]}
             for u in db.rows("SELECT * FROM users ORDER BY id")]  # fmt: skip
 
 
@@ -84,14 +86,25 @@ def set_email(user_id: int, email: str) -> str:
     return email
 
 
-def create(username: str, password: str, role: str) -> int:
+def _business(role: str, brand_id: int) -> int:
+    """Admins belong to every business (0); owners and viewers to exactly one that exists."""
+    if role == "admin":
+        return 0
+    if not brand_id or not db.rows("SELECT id FROM brands WHERE id = ?", brand_id):
+        raise ValueError("Pick the business this person belongs to")
+    return int(brand_id)
+
+
+def create(username: str, password: str, role: str, brand_id: int = 0) -> int:
+    role = ALIASES.get(role, role)
     if role not in ROLES:
-        raise ValueError("Pick admin, approver or viewer")
+        raise ValueError("Pick admin, owner or viewer")
     username = _name(username)
     if by_name(username):
         raise ValueError("That username is taken")
-    return db.execute("INSERT INTO users (username, hash, role, ver, created_at) VALUES (?,?,?,?,?)",
-                      username, _password(password), role, secrets.token_hex(8), db.now())  # fmt: skip
+    business = _business(role, brand_id)
+    return db.execute("INSERT INTO users (username, hash, role, ver, created_at, brand_id) VALUES (?,?,?,?,?,?)",
+                      username, _password(password), role, secrets.token_hex(8), db.now(), business)  # fmt: skip
 
 
 def admins_left(without: int) -> int:
@@ -99,17 +112,18 @@ def admins_left(without: int) -> int:
 
 
 def change(user_id: int, *, role: str | None = None, active: bool | None = None, password: str | None = None,
-           username: str | None = None) -> None:  # fmt: skip
+           username: str | None = None, brand_id: int | None = None) -> None:  # fmt: skip
     user = get(user_id)
     if user is None:
         raise ValueError("No such person")
-    new_role = role if role is not None else user["role"]
+    new_role = ALIASES.get(role, role) if role is not None else user["role"]
     new_active = bool(user["active"]) if active is None else active
     if new_role not in ROLES:
-        raise ValueError("Pick admin, approver or viewer")
+        raise ValueError("Pick admin, owner or viewer")
+    new_business = _business(new_role, user["brand_id"] if brand_id is None else brand_id)
     if (new_role != "admin" or not new_active) and user["role"] == "admin" and user["active"] and admins_left(user_id) == 0:
         raise ValueError("There must always be one active admin")
-    sets, params = ["role = ?", "active = ?"], [new_role, int(new_active)]
+    sets, params = ["role = ?", "active = ?", "brand_id = ?"], [new_role, int(new_active), new_business]
     if username is not None and username != user["username"]:
         name = _name(username)
         other = by_name(name)
@@ -120,7 +134,7 @@ def change(user_id: int, *, role: str | None = None, active: bool | None = None,
     if password:
         sets += ["hash = ?", "ver = ?"]
         params += [_password(password), secrets.token_hex(8)]
-    elif not new_active or new_role != user["role"]:
+    elif not new_active or new_role != user["role"] or new_business != user["brand_id"]:
         sets.append("ver = ?")  # signs them out so the new role or the block applies at once
         params.append(secrets.token_hex(8))
     db.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", *params, user_id)  # noqa: S608 - fixed column names

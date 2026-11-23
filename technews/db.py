@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL,
     hash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'viewer',  -- admin | approver | viewer
+    role TEXT NOT NULL DEFAULT 'viewer',  -- admin (every business) | owner | viewer (of brand_id)
     active INTEGER NOT NULL DEFAULT 1,
     ver TEXT NOT NULL DEFAULT '0',  -- changes with the password, which signs that person out everywhere
     totp TEXT NOT NULL DEFAULT '',  -- the authenticator secret once 2-step sign-in is on
@@ -307,7 +307,8 @@ def init() -> None:
              ("metrics", "reach", "INTEGER NOT NULL DEFAULT 0"), ("brands", "about", "TEXT NOT NULL DEFAULT ''"),
              ("brands", "kinds", "TEXT NOT NULL DEFAULT 'news,flyers,ideas,videos'"), ("brands", "nvidia_key", "TEXT NOT NULL DEFAULT ''"),
              ("brands", "telegram_chat", "TEXT NOT NULL DEFAULT ''"), ("brands", "colors", "TEXT NOT NULL DEFAULT ''"),
-             ("brands", "delivery", "TEXT NOT NULL DEFAULT ''"))  # fmt: skip
+             ("brands", "delivery", "TEXT NOT NULL DEFAULT ''"),
+             ("users", "brand_id", "INTEGER NOT NULL DEFAULT 0"))  # fmt: skip
     for table, col, ddl in added:  # older databases
         if col not in columns(table):
             _ddl(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
