@@ -82,7 +82,13 @@ CREATE TABLE IF NOT EXISTS brands (
     site TEXT NOT NULL DEFAULT '',
     categories TEXT NOT NULL DEFAULT '',  -- news tags this brand posts, comma separated; empty means all
     posts_per_day INTEGER NOT NULL DEFAULT 0,  -- 0 uses the general limit
-    enabled INTEGER NOT NULL DEFAULT 1
+    enabled INTEGER NOT NULL DEFAULT 1,
+    about TEXT NOT NULL DEFAULT '',  -- what the business does, who it serves, how it talks (fed to the writers)
+    kinds TEXT NOT NULL DEFAULT 'news,flyers,ideas,videos',  -- what it posts, comma separated (brands.KINDS)
+    nvidia_key TEXT NOT NULL DEFAULT '',  -- its own AI key, sealed; empty means template copy
+    telegram_chat TEXT NOT NULL DEFAULT '',  -- an extra Telegram chat that gets only this business's alerts
+    colors TEXT NOT NULL DEFAULT '',  -- JSON {bg, accent}
+    delivery TEXT NOT NULL DEFAULT ''  -- '' follows the general setting; 'dry_run' never posts for this business
 );
 CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -298,7 +304,10 @@ def init() -> None:
              ("flyers", "style", "TEXT NOT NULL DEFAULT ''"), ("flyers", "brand_id", "INTEGER NOT NULL DEFAULT 1"),
              ("users", "email", "TEXT NOT NULL DEFAULT ''"), ("metrics", "plays", "INTEGER NOT NULL DEFAULT 0"),
              ("metrics", "saves", "INTEGER NOT NULL DEFAULT 0"), ("metrics", "shares", "INTEGER NOT NULL DEFAULT 0"),
-             ("metrics", "reach", "INTEGER NOT NULL DEFAULT 0"))  # fmt: skip
+             ("metrics", "reach", "INTEGER NOT NULL DEFAULT 0"), ("brands", "about", "TEXT NOT NULL DEFAULT ''"),
+             ("brands", "kinds", "TEXT NOT NULL DEFAULT 'news,flyers,ideas,videos'"), ("brands", "nvidia_key", "TEXT NOT NULL DEFAULT ''"),
+             ("brands", "telegram_chat", "TEXT NOT NULL DEFAULT ''"), ("brands", "colors", "TEXT NOT NULL DEFAULT ''"),
+             ("brands", "delivery", "TEXT NOT NULL DEFAULT ''"))  # fmt: skip
     for table, col, ddl in added:  # older databases
         if col not in columns(table):
             _ddl(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")

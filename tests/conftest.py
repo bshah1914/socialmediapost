@@ -60,4 +60,6 @@ def make_brand(name, **fields):
     """Add a business with these fields; returns its id."""
     from technews import brands
 
+    brands.seed()  # business #1 exists first, as it does when the app starts
+
     return brands.save(None, {"name": name, **fields})

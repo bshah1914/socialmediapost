@@ -45,6 +45,7 @@ class Config:
     DB_PATH = DATA_DIR / "technews.db"
     BRAND_ID = 1  # the brand the running code is working for (see brands.py)
     BRAND_NAME = "CloudTrio"
+    BRAND_ABOUT = ""  # what the business does, in its own words (set per business, see brands.py)
     DATABASE_URL = _str("DATABASE_URL")  # postgresql://user:password@host/db ; empty means the SQLite file above
     CARDS_DIR = DATA_DIR / "cards"
     OUTBOX_DIR = DATA_DIR / "outbox"

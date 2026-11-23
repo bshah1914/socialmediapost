@@ -1138,7 +1138,7 @@ def test_each_brand_has_its_own_settings_flyers_and_posts(monkeypatch):
 
     with brands.use(acme):  # code running for Acme sees Acme's values, and only inside
         assert settings.IG_HANDLE == "acme" and settings.IG_USERNAME == "acme_ig" and settings.POSTS_PER_DAY == 2
-        assert settings.IG_PASSWORD == "pw-1" and settings.IG_SESSION_PATH.name == f"ig_session_{acme}.json"
+        assert settings.IG_PASSWORD == "pw-1" and settings.IG_SESSION_PATH == settings.DATA_DIR / "brands" / str(acme) / "ig_session.json"
         assert settings.LINKEDIN_ENABLED is False
     assert settings.IG_HANDLE == "cloudtrio.in" and settings.IG_SESSION_PATH.name == "ig_session.json"
 
