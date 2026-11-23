@@ -1,8 +1,27 @@
 # socialmediapost: every business, one console (Instagram posts, Reels, flyers, tech news)
 
-A Flask app with a scheduler that watches IT / tech news in near real time (hacks, breaches,
-zero-days, scams, AI launches, big tech, outages, viral tech moments) and posts only the top
-stories to Instagram as image cards.
+One console for the Instagram pages of several businesses. Each business is kept apart: its own
+Instagram account, NVIDIA key, files, posts, hashtags, voice and daily limit. CloudTrio (business #1)
+also runs the tech-news newsroom: it watches IT / tech news in near real time and posts the top
+stories as image cards, with marketing flyers between them.
+
+## Businesses
+
+- **Add a business** (Settings, admins): seven steps (profile, what it posts, logo and colours, Instagram,
+  its own AI key, hashtags and Telegram chat) and a readiness check before it is switched on. Tick
+  **Trial run** to make its posts without putting them on Instagram.
+- **What it posts**: any of tech news, flyers, posts and Reels from ideas, its own videos.
+- **People**: admins see every business; an **owner** (approves, creates, uploads) or **viewer** (looks)
+  belongs to one business and never sees the others.
+- **AI key**: a business uses only its own key; without one its captions come from templates.
+- **Telegram**: one bot. The admin chat gets every business's alerts, each starting with the business
+  name; a business can add its own chat, which gets only its alerts and may approve only its posts.
+- **Reel from an idea**: Create, *Make it as: Reel*, pick the animation and music.
+- **Upload video**: MP4/MOV up to 300 MB, trimmed to 3 minutes or less, fitted to 1080x1920 (a sideways video
+  gets a blurred fill), logo, title, sound (original, music, or both), cover, then a Reel or a photo post
+  waiting for approval. Originals are deleted 30 days after posting.
+
+Moving the live CloudTrio page over from `technews`: see `docs/switch-over.md`.
 
 ## The agent team (NVIDIA NIM)
 
@@ -66,6 +85,15 @@ Use `.venv/bin/flask`, not a system `flask`. CLI: `flask --app run cycle [--no-p
 POST endpoints need `X-Admin-Token` when `ADMIN_TOKEN` is set.
 
 ## Tests
+
+Browser tests (Playwright; start the app themselves, in dry run, with an empty data folder):
+
+```bash
+.venv/bin/python -m playwright install chromium   # once
+.venv/bin/python -m pytest tests/e2e -m e2e -q
+```
+
+Unit and API tests:
 
 ```bash
 .venv/bin/python -m pytest -q
