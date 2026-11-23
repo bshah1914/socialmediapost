@@ -523,7 +523,7 @@ def create_app() -> Flask:
         if not (brands.has("videos", g.brand) and motion.available()):
             hidden.add("videos")
         if g.role != "admin":  # a business's own people never see the admin pages nor the other businesses
-            hidden |= {"sources", "settings"}
+            hidden |= {"sources", "settings", "businesses"}
         shown = [b for b in brands.listing() if b["enabled"] and (g.role == "admin" or b["id"] == g.brand["id"])]
         return render_template("dashboard.html", brand_list=shown, brand_now=g.brand["id"], brand_name=g.brand["name"], nav_hide=hidden,
                                brand_site=settings.BRAND_SITE, brand_email=settings.BRAND_EMAIL, status=status(), stories=stories, posts=posts, pending=pending,

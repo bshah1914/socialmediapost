@@ -145,3 +145,16 @@ def test_admin_changes_a_person_to_owner_of_the_open_business():
     r = admin.post(f"/api/users/{uid}", json={"role": "owner"})
     assert r.status_code == 200, r.get_json()
     assert users.get(uid)["role"] == "owner" and users.get(uid)["brand_id"] == b2
+
+
+def test_businesses_have_their_own_section_for_admins():
+    import re as _re
+
+    admin = client_as("boss", "Admin@1234").get("/").get_data(as_text=True)
+    assert 'href="#businesses"' in admin
+    section = _re.search(r'<section id="businesses".*?</section>\s*(?=<!--|<section)', admin, _re.S).group(0)
+    assert 'id="onboard"' in section and 'id="biz-health"' in section and 'id="br-list"' in section
+    settings_part = _re.search(r'<section id="settings".*?</section>\s*(?=<!--|<section|</main>)', admin, _re.S).group(0)
+    assert 'id="onboard"' not in settings_part and 'id="biz-health"' not in settings_part
+    owner = client_as("baker", "Pass@1234", "owner", make_brand("Bakery")).get("/").get_data(as_text=True)
+    assert 'href="#businesses"' not in owner and 'id="onboard"' not in owner

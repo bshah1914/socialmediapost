@@ -25,7 +25,7 @@ def _business(page, name, **fields):
 
 def test_admin_onboards_business(sign_in, tmp_path):
     page = sign_in()
-    page.goto("/#settings")
+    page.goto("/#businesses")
     card = page.locator("#onboard")
     card.get_by_label("Business name").fill("Bakery Pune")
     card.get_by_label("What it does, who it is for, how it talks").fill("A family bakery in Pune since 1998. Sourdough and cakes to order.")
@@ -52,7 +52,7 @@ def test_admin_onboards_business(sign_in, tmp_path):
     card.get_by_role("button", name="Switch on").click()
     page.locator("#ob-msg").get_by_text("Switched on.").wait_for()
     page.wait_for_load_state("load")
-    page.goto("/#settings")
+    page.goto("/#businesses")
     assert "Bakery Pune" in page.locator("#brand-sw").inner_text()
     page.locator("#biz-health tbody").get_by_text("Bakery Pune").wait_for()
     row = page.locator("#biz-health tbody tr", has_text="Bakery Pune")
@@ -142,7 +142,7 @@ def test_cloudtrio_still_drafts_news_and_flyers(sign_in, server):
     page.locator("#posts").get_by_text("AWS launches a new region in Spain").first.wait_for()
 
 
-@pytest.mark.parametrize("view", ["create", "videos", "approvals", "settings"])
+@pytest.mark.parametrize("view", ["create", "videos", "approvals", "settings", "businesses"])
 def test_phone_width(sign_in, view):
     page = sign_in(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
     page.goto(f"/#{view}")
