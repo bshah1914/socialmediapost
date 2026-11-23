@@ -1,15 +1,15 @@
-# CloudTrio Newsroom. Start with:  docker compose up -d --build
-# The data (database, Instagram session, cards, saved settings) lives in the "newsroom-data" volume.
+# socialmediapost: every business in one console. Start with:  docker compose up -d --build
+# The data (database, Instagram session, cards, saved settings) lives in the "socialmediapost-data" volume.
 services:
-  newsroom:
+  socialmediapost:
     build: .
-    image: cloudtrio/newsroom:latest
-    container_name: cloudtrio-newsroom
+    image: socialmediapost:latest
+    container_name: socialmediapost
     restart: unless-stopped
     ports:
       - "${BIND:-127.0.0.1}:5000:5000"   # BIND=0.0.0.0 to reach it on the LAN without the proxy
     volumes:
-      - newsroom-data:/data
+      - socialmediapost-data:/data
     environment:
       TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
       ADMIN_USER: ${ADMIN_USER:-}          # only used to create the account on the very first start
@@ -20,14 +20,14 @@ services:
   caddy:
     profiles: ["proxy"]
     image: caddy:2
-    container_name: cloudtrio-caddy
+    container_name: socialmediapost-caddy
     restart: unless-stopped
     ports: ["80:80", "443:443"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
-    depends_on: [newsroom]
+    depends_on: [socialmediapost]
 
 volumes:
-  newsroom-data:
+  socialmediapost-data:
   caddy-data:

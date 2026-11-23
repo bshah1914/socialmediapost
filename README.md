@@ -1,4 +1,4 @@
-# Tech Newsroom: agentic IT-news → Instagram
+# socialmediapost: every business, one console (Instagram posts, Reels, flyers, tech news)
 
 A Flask app with a scheduler that watches IT / tech news in near real time (hacks, breaches,
 zero-days, scams, AI launches, big tech, outages, viral tech moments) and posts only the top

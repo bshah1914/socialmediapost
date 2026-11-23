@@ -1,4 +1,4 @@
 post.cloudtrio.in {
 	encode gzip
-	reverse_proxy newsroom:5000
+	reverse_proxy socialmediapost:5000
 }

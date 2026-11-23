@@ -8,38 +8,7 @@ from technews import config, db, pipeline, sources
 from technews.agents import llm, reviewer, scanner, writer
 from technews.config import settings
 
-
-def _reset_postgres(url):
-    """An empty PostgreSQL schema. Connections a background thread of an earlier test still holds are closed first."""
-    import psycopg
-
-    with psycopg.connect(url, autocommit=True) as conn:
-        conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()")
-        conn.execute("DROP SCHEMA public CASCADE")
-        conn.execute("CREATE SCHEMA public")
-
-
-@pytest.fixture(autouse=True)
-def tmp_data(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(settings, "DB_PATH", tmp_path / "t.db")
-    monkeypatch.setattr(settings, "CARDS_DIR", tmp_path / "cards")
-    monkeypatch.setattr(settings, "OUTBOX_DIR", tmp_path / "outbox")
-    monkeypatch.setattr(settings, "IG_SESSION_PATH", tmp_path / "ig_session.json")  # never the real saved login
-    monkeypatch.setattr(settings, "IG_DELIVERY", "dry_run")
-    monkeypatch.setattr(settings, "NVIDIA_API_KEY", "")
-    monkeypatch.setattr(settings, "APPROVAL_MODE", "off")
-    monkeypatch.setattr(settings, "ADMIN_TOKEN", "")
-    monkeypatch.setattr(settings, "REELS_PER_WEEK", 0)  # a test that wants a Reel asks for one
-    monkeypatch.setattr(settings, "SCHEDULER_ENABLED", False)  # no background cycles outliving the test
-    monkeypatch.setattr(settings, "COLLECT_METRICS", False)
-    monkeypatch.setattr(config, "ENV_PATH", tmp_path / ".env")  # a test must never write the real .env
-    url = os.environ.get("TEST_DATABASE_URL", "")  # run the suite on PostgreSQL: TEST_DATABASE_URL=postgresql://...
-    monkeypatch.setattr(settings, "DATABASE_URL", url)
-    if url:
-        db.close()
-        _reset_postgres(url)
-    db.init()
+from conftest import _reset_postgres
 
 
 def _client():
