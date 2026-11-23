@@ -137,7 +137,7 @@ def _tell_logged_out(why: str) -> None:
     try:
         from technews import notify
 
-        notify.send(notify.title("Instagram logged this page out"),
+        notify.send(notify.title("Instagram logged the newsroom out"),
                     f"Instagram ended the saved session ({why}), so nothing can be posted. Reconnect under Settings, Instagram "
                     f"(password, or the browser session). {settings.PUBLIC_URL.rstrip('/')}/#settings")  # fmt: skip
     except Exception:  # noqa: BLE001 - the alert is best effort
