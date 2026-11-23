@@ -291,6 +291,9 @@ def run_next() -> bool:
     """Make the next queued video. Returns False when there was nothing to do."""
     with _lock:
         stale = (datetime.now(UTC) - timedelta(minutes=STALE_MINUTES)).isoformat(timespec="seconds")
+        # a job the server stopped in the middle of: tried again, unless that was its last try
+        db.execute("UPDATE videos SET status = 'failed', error = 'The server stopped while making it. Upload it again or press Make again.' "
+                   "WHERE status = 'working' AND started_at < ? AND attempts >= ?", stale, MAX_ATTEMPTS)  # fmt: skip
         db.execute("UPDATE videos SET status = 'queued' WHERE status = 'working' AND started_at < ?", stale)
         found = db.rows("SELECT * FROM videos WHERE status = 'queued' AND attempts < ? ORDER BY id LIMIT 1", MAX_ATTEMPTS)
         if not found:

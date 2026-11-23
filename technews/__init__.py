@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from functools import wraps
@@ -301,9 +302,12 @@ def create_app() -> Flask:
     @admin
     def api_users_change(user_id: int) -> Any:
         body = request.get_json(silent=True) or {}
+        business = int(body["brand_id"]) if body.get("brand_id") else None
+        person = users.get(user_id)
+        if business is None and person and not person["brand_id"] and body.get("role") in ("owner", "approver", "viewer"):
+            business = g.brand["id"]  # an admin becoming an owner or viewer joins the business that is open
         try:
-            users.change(user_id, role=body.get("role"), active=body.get("active"), password=body.get("password") or None,
-                         brand_id=int(body["brand_id"]) if body.get("brand_id") else None)
+            users.change(user_id, role=body.get("role"), active=body.get("active"), password=body.get("password") or None, brand_id=business)
             if body.get("reset_two_step"):
                 users.set_totp(user_id, "")
             if "email" in body:
@@ -1233,13 +1237,16 @@ def create_app() -> Flask:
     @admin
     def api_video_frame(video_id: int) -> Any:
         """A preview of one moment of the video, to choose the cover."""
+        out = videos.folder() / f"preview-{video_id}-{uuid.uuid4().hex}.jpg"  # its own file: the page asks for several at once
         try:
             row = videos.get(video_id)
             at = float(request.args.get("at") or 0)
-            out = videos.frame_jpg(videos.folder() / row["stored"], at, videos.folder() / f"preview-{video_id}.jpg", size=(540, 960))
+            jpeg = videos.frame_jpg(videos.folder() / row["stored"], at, out, size=(540, 960)).read_bytes()
         except (videos.VideoError, ValueError):
             abort(404)
-        return send_file(out, mimetype="image/jpeg", max_age=0)
+        finally:
+            out.unlink(missing_ok=True)
+        return app.response_class(jpeg, mimetype="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.post("/api/videos/<int:video_id>/make")
     @admin

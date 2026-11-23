@@ -135,3 +135,13 @@ def test_owner_page_hides_admin_sections_and_other_businesses():
     assert "<b>Bakery</b>" in owner
     admin = client_as("boss", "Admin@1234").get("/").get_data(as_text=True)
     assert 'href="#settings"' in admin and 'href="#stories"' in admin and 'id="brand-sw"' in admin and "Salon" in admin
+
+
+def test_admin_changes_a_person_to_owner_of_the_open_business():
+    b2 = make_brand("Bakery")
+    admin = client_as("boss", "Admin@1234")
+    uid = users.create("second", "Admin@1234", "admin")
+    admin.post("/api/brand", json={"id": b2})
+    r = admin.post(f"/api/users/{uid}", json={"role": "owner"})
+    assert r.status_code == 200, r.get_json()
+    assert users.get(uid)["role"] == "owner" and users.get(uid)["brand_id"] == b2

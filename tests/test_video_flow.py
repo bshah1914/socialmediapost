@@ -147,3 +147,21 @@ def test_upload_section_only_for_businesses_with_videos():
     assert 'href="#videos"' not in owner
     admin = client_as("boss", "Admin@1234").get("/").get_data(as_text=True)
     assert 'href="#videos"' in admin and 'id="vd-file"' in admin
+
+
+def test_cover_previews_asked_together_are_each_their_own_frame(clip_portrait):
+    from concurrent.futures import ThreadPoolExecutor
+
+    c = client_as("boss", "Admin@1234")
+    vid = _upload(c, clip_portrait)
+    app = c.application
+    cookie = c.get_cookie("session").value
+
+    def frame(at):
+        other = app.test_client()
+        other.set_cookie("session", cookie)
+        return other.get(f"/api/videos/{vid}/frame.jpg?at={at}").data
+
+    with ThreadPoolExecutor(4) as pool:
+        got = list(pool.map(frame, [0.2, 1.0, 1.8, 2.6]))
+    assert all(got) and len(set(got)) == 4  # four different pictures, none overwritten by another

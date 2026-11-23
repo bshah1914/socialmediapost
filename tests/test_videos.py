@@ -180,3 +180,12 @@ def test_scheduler_makes_every_queued_video(clip_portrait):
         videos.queue(v["id"], videos.Options(logo=False, title=False))
     assert scheduler.videos_tick() == 2
     assert {r["status"] for r in db.rows("SELECT status FROM videos")} == {"done"}
+
+
+def test_job_stuck_on_its_last_attempt_is_marked_failed(clip_portrait):
+    v = videos.save_upload(clip_portrait.open("rb"), "p.mp4")
+    videos.queue(v["id"], videos.Options())
+    db.execute("UPDATE videos SET status = 'working', attempts = 2, started_at = '2000-01-01T00:00:00+00:00' WHERE id = ?", v["id"])
+    videos.run_next()
+    row = db.rows("SELECT status, error FROM videos WHERE id = ?", v["id"])[0]
+    assert row["status"] == "failed" and "stopped" in row["error"]
