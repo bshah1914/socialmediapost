@@ -206,6 +206,24 @@ CREATE TABLE IF NOT EXISTS ideas (
     flyer_id TEXT NOT NULL DEFAULT '',
     post_id INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS videos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    brand_id INTEGER NOT NULL DEFAULT 1,
+    at TEXT NOT NULL,
+    stored TEXT NOT NULL,  -- the file name in the business's videos folder
+    original_name TEXT NOT NULL DEFAULT '',
+    seconds REAL NOT NULL DEFAULT 0,
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    has_audio INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'uploaded',  -- uploaded | queued | working | done | failed
+    error TEXT NOT NULL DEFAULT '',
+    options TEXT NOT NULL DEFAULT '',  -- JSON of videos.Options
+    attempts INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL DEFAULT '',
+    post_id INTEGER NOT NULL DEFAULT 0,
+    posted_at TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -218,7 +236,7 @@ def now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-_ID_TABLES = frozenset({"stories", "posts", "sources", "users", "audit", "notes", "brands", "agent_runs", "feedback", "playbooks", "proposals", "source_ideas", "ideas"})  # tables whose id the database makes
+_ID_TABLES = frozenset({"stories", "posts", "sources", "users", "audit", "notes", "brands", "agent_runs", "feedback", "playbooks", "proposals", "source_ideas", "ideas", "videos"})  # tables whose id the database makes
 _pool: Any = None
 _pool_lock = threading.Lock()
 

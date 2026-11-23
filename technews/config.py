@@ -93,6 +93,7 @@ class Config:
     REEL_MUSIC = _str("REEL_MUSIC", "upbeat")  # upbeat | calm (built-in instrumentals) | custom (your upload) | none
     REEL_SECONDS = _int("REEL_SECONDS", 12)
     REEL_CTA = _str("REEL_CTA", "Follow for daily cloud news and tips")
+    VIDEO_WORKER = _bool("VIDEO_WORKER", True)  # process uploaded videos in the background as soon as they are queued
     IG_RESTRICT_PAUSE_HOURS = _float("IG_RESTRICT_PAUSE_HOURS", 24)
     IG_WARNED_PAUSE_MINUTES = _float("IG_WARNED_PAUSE_MINUTES", 10)
     HASHTAG_LIMIT = 5  # Instagram's cap since Dec 2025

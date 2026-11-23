@@ -8,7 +8,7 @@ from pathlib import Path
 
 from technews import db
 
-TABLES = ("stories", "posts", "flyers", "sources", "users", "audit", "notes", "brands", "agent_runs", "feedback", "playbooks", "proposals", "metrics", "source_health", "source_ideas", "ideas", "kv")
+TABLES = ("stories", "posts", "flyers", "sources", "users", "audit", "notes", "brands", "agent_runs", "feedback", "playbooks", "proposals", "metrics", "source_health", "source_ideas", "ideas", "videos", "kv")
 
 
 def to_postgres(sqlite_path: Path, url: str, *, replace: bool = False) -> dict[str, int]:

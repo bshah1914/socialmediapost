@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from technews import analytics, backup, brands, config, db, festivals, monitor, pipeline, telegram, watchdog
+from technews import analytics, backup, brands, config, db, festivals, monitor, pipeline, telegram, videos, watchdog
 from technews.agents import analyst, scout, trainer
 from technews.config import settings
 
@@ -49,6 +49,8 @@ def start() -> BackgroundScheduler:
     _scheduler.add_job(watchdog.check, "interval", minutes=10, id="watchdog", max_instances=1, coalesce=True, misfire_grace_time=600)
     _scheduler.add_job(watchdog.health, "interval", minutes=30, id="health", max_instances=1, coalesce=True, misfire_grace_time=900,
                        next_run_time=datetime.now(_scheduler.timezone) + timedelta(minutes=6))  # fmt: skip
+    _scheduler.add_job(videos_tick, "interval", minutes=1, id="videos", max_instances=1, coalesce=True, misfire_grace_time=120)
+    _scheduler.add_job(videos.cleanup, "cron", hour=2, minute=40, id="videos_cleanup", max_instances=1, coalesce=True, misfire_grace_time=6 * 3600)
     _scheduler.start()
     logger.info("scheduler.started every=%dmin", settings.SCAN_INTERVAL_MINUTES)
     return _scheduler
@@ -135,6 +137,17 @@ def weekly_report() -> None:
                 analytics.weekly_report()
             except Exception:  # noqa: BLE001
                 logger.exception("scheduler.weekly_report_failed brand=%s", brand["name"])
+
+
+def videos_tick() -> int:
+    """Make every video waiting in the queue (each as its own business). Returns how many jobs ran."""
+    ran = 0
+    try:
+        while videos.run_next():
+            ran += 1
+    except Exception:  # noqa: BLE001 - the next minute tries again
+        logger.exception("scheduler.videos_failed")
+    return ran
 
 
 def metrics() -> None:

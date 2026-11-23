@@ -449,6 +449,21 @@ def _render_news(story_id: int, story: dict[str, Any], draft: writer.Draft, layo
     return card.render(story_id=story_id, category=story["category"], headline=draft.headline, points=draft.points, source=story["source"])
 
 
+def draft_video(video_id: int, mp4: Path, cover: Path) -> int:
+    """A business's own video, made into a Reel (``mp4`` with ``cover``), held for approval. Returns the post id."""
+    from technews import videos
+
+    row = videos.get(video_id)
+    opts = videos.Options.from_dict(json.loads(row["options"] or "{}"))
+    headline = (opts.title_text or opts.about or Path(row["original_name"]).stem or "Our video").strip()[:120]
+    caption = f"{opts.about.strip() or headline}\n\n{flyers.hashtags()}"
+    meta = json.dumps({"reel": {"video": mp4.name, "cover": cover.name, "style": "upload"}, "video_id": video_id})
+    post_id = _save_draft(0, headline, caption, cover, "video", "", meta)
+    db.execute("UPDATE videos SET post_id = ? WHERE id = ?", post_id, video_id)
+    notify.draft_ready(headline, "video reel", mp4, post_id=post_id)
+    return post_id
+
+
 def draft_flyer(flyer: flyers.Flyer | None = None, *, tags: str | None = None, for_reel: bool = False) -> dict[str, Any]:
     flyer = flyer or pick_flyer()
     caption = f"{flyer.caption}\n\n{flyers.hashtags() if tags is None else tags}"

@@ -32,6 +32,7 @@ def tmp_data(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "REELS_PER_WEEK", 0)  # a test that wants a Reel asks for one
     monkeypatch.setattr(settings, "SCHEDULER_ENABLED", False)  # no background cycles outliving the test
     monkeypatch.setattr(settings, "COLLECT_METRICS", False)
+    monkeypatch.setattr(settings, "VIDEO_WORKER", False)  # a test runs the video jobs itself
     monkeypatch.setattr(config, "ENV_PATH", tmp_path / ".env")  # a test must never write the real .env
     url = os.environ.get("TEST_DATABASE_URL", "")  # run the suite on PostgreSQL: TEST_DATABASE_URL=postgresql://...
     monkeypatch.setattr(settings, "DATABASE_URL", url)
