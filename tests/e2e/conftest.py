@@ -29,7 +29,7 @@ def server(tmp_path_factory):
     port = _free_port()
     env = {**os.environ, "DATA_DIR": str(data), "ENV_FILE": str(data / ".env"), "PORT": str(port), "IG_DELIVERY": "dry_run",
            "NVIDIA_API_KEY": "", "LLM2_API_KEY": "", "TELEGRAM_BOT_TOKEN": "", "TELEGRAM_CHAT_ID": "", "SCHEDULER_ENABLED": "0",
-           "ADMIN_USER": ADMIN[0], "ADMIN_PASSWORD": ADMIN[1], "VIDEO_WORKER": "1", "REEL_SECONDS": "4", "SECRETS_KEY": "",
+           "ADMIN_USER": ADMIN[0], "ADMIN_PASSWORD": ADMIN[1], "VIDEO_WORKER": "1", "REEL_SECONDS": "4", "REELS_PER_WEEK": "0", "SECRETS_KEY": "",
            "PUBLIC_URL": "", "PYTHONUNBUFFERED": "1"}  # fmt: skip
     log = (data / "server.log").open("w", encoding="utf-8")
     proc = subprocess.Popen([sys.executable, "run.py"], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
