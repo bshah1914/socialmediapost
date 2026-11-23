@@ -53,7 +53,7 @@ class Config:
     NVIDIA_API_KEY = _str("NVIDIA_API_KEY")
     NVIDIA_API_BASE_URL = _str("NVIDIA_API_BASE_URL", "https://integrate.api.nvidia.com/v1")
     NVIDIA_MODEL = _str("NVIDIA_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
-    NVIDIA_FALLBACK_MODELS = [m.strip() for m in _str("NVIDIA_FALLBACK_MODELS", "openai/gpt-oss-20b").split(",") if m.strip()]
+    NVIDIA_FALLBACK_MODELS = [m.strip() for m in _str("NVIDIA_FALLBACK_MODELS", "nvidia/nemotron-3.5-super-vl-120b-a12b,nvidia/nemotron-3.5-lightning-30b-a3b").split(",") if m.strip()]
     NVIDIA_TIMEOUT_SECONDS = _int("NVIDIA_TIMEOUT_SECONDS", 120)
     LLM2_BASE_URL = _str("LLM2_BASE_URL")  # a second AI service, used when NVIDIA fails (any OpenAI-compatible endpoint)
     LLM2_API_KEY = _str("LLM2_API_KEY")
@@ -101,6 +101,8 @@ class Config:
     FLYER_HASHTAGS = _str("FLYER_HASHTAGS", "#cloudcomputing #aws #azure #devops #cloudtrio")
     APPROVAL_MODE = _str("APPROVAL_MODE", "all")  # all | flyers | off: what waits for a human OK before posting
     APPROVAL_QUEUE_MAX = _int("APPROVAL_QUEUE_MAX", 3)  # drafts waiting at once; no more are made until you decide
+    NEWS_DRAFT_MAX_HOURS = _int("NEWS_DRAFT_MAX_HOURS", 12)  # a news draft not decided by then is withdrawn (0 keeps them)
+    BREAKING_NEWS = _bool("BREAKING_NEWS", True)  # big confirmed incidents skip the queue and the gap between posts
     LINKEDIN_ENABLED = _bool("LINKEDIN_ENABLED", False)  # post the flyers to LinkedIn too
     LINKEDIN_ACCESS_TOKEN = _str("LINKEDIN_ACCESS_TOKEN")
     LINKEDIN_AUTHOR = _str("LINKEDIN_AUTHOR")  # urn:li:organization:<id> (company page) or urn:li:person:<id>
@@ -194,6 +196,8 @@ EDITABLE: dict[str, tuple[type, bool]] = {
     "REEL_SECONDS": (int, False),
     "REEL_CTA": (str, False),
     "APPROVAL_QUEUE_MAX": (int, False),
+    "NEWS_DRAFT_MAX_HOURS": (int, False),
+    "BREAKING_NEWS": (bool, False),
     "TIMEZONE": (str, False),
     "BRAND_EMAIL": (str, False),
     "BRAND_SITE": (str, False),
@@ -231,7 +235,7 @@ EDITABLE: dict[str, tuple[type, bool]] = {
 RANGES: dict[str, tuple[float, float]] = {
     "WATCHDOG_MINUTES": (0, 1440),
     "SCAN_MAX_AGE_HOURS": (1, 168), "SCAN_MIN_SCORE": (0, 10), "REVIEW_MIN_SCORE": (0, 10),
-    "SMTP_PORT": (1, 65535), "FLYER_AFTER_NEWS": (1, 10), "APPROVAL_QUEUE_MAX": (1, 20), "POSTS_PER_DAY": (1, 50),
+    "SMTP_PORT": (1, 65535), "FLYER_AFTER_NEWS": (1, 10), "APPROVAL_QUEUE_MAX": (1, 20), "NEWS_DRAFT_MAX_HOURS": (0, 168), "POSTS_PER_DAY": (1, 50),
     "REELS_PER_WEEK": (0, 21), "REEL_SECONDS": (6, 30),
 }  # fmt: skip
 

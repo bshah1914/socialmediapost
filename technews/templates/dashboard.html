@@ -104,6 +104,7 @@
   .pill.posted, .pill.approved { background:var(--ok-soft); color:var(--ok); }
   .pill.new, .pill.pending { background:var(--warn-soft); color:var(--warn); }
   .pill.failed, .pill.rejected { background:var(--bad-soft); color:var(--bad); }
+  .pill.expired { background:color-mix(in srgb, var(--muted) 16%, transparent); color:var(--muted); }
   .pill.low, .pill.not_tech { background:var(--surface-2); color:var(--muted); border-color:var(--line); }
   .cal { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:6px; }
   .cal-h { font-size:.8em; color:var(--muted); font-weight:700; text-align:center; padding:2px 0; }
@@ -1000,7 +1001,7 @@
             <div class="muted">{{ p.created_at[:16].replace('T', ' ') }} UTC · {{ p.delivered }}</div>
             {% if p.permalink %}<a href="{{ p.permalink }}" target="_blank" rel="noopener">Open on Instagram</a>{% endif %}
             {% if p.linkedin.startswith('http') %}<a href="{{ p.linkedin }}" target="_blank" rel="noopener">Open on LinkedIn</a>{% endif %}
-            {% if p.error %}<span style="color:{{ 'var(--muted)' if p.status == 'deleted' else 'var(--bad)' }}">{{ p.error[:120] }}</span>{% endif %}
+            {% if p.error %}<span style="color:{{ 'var(--muted)' if p.status in ('deleted', 'expired') else 'var(--bad)' }}">{{ p.error[:120] }}</span>{% endif %}
             {% if role == 'admin' %}<div class="row" style="gap:6px;flex-wrap:wrap">
               {% if p.status == 'posted' %}<button class="btn sm ghost" type="button" onclick="managePost(this, 'caption')">Edit caption</button>{% endif %}
               <button class="btn sm ghost" type="button" onclick="managePost(this, 'repost')">{{ "Fix and repost" if p.status == 'posted' else "Post again" }}</button>
@@ -1193,9 +1194,11 @@
             <div><label for="REVIEW_MIN_SCORE">Reviewer minimum score (0-10)</label><input id="REVIEW_MIN_SCORE" type="number" min="0" max="10" step="0.5"></div>
             <div><label for="FLYER_AFTER_NEWS">One flyer after how many news posts</label><input id="FLYER_AFTER_NEWS" type="number" min="1" max="10"></div>
             <div><label for="APPROVAL_QUEUE_MAX">Drafts waiting at once</label><input id="APPROVAL_QUEUE_MAX" type="number" min="1" max="20"></div>
+            <div><label for="NEWS_DRAFT_MAX_HOURS">Withdraw a news draft not decided within (hours, 0 keeps it)</label><input id="NEWS_DRAFT_MAX_HOURS" type="number" min="0" max="168"></div>
           </div>
           <label for="TIMEZONE">Time zone</label><input id="TIMEZONE" type="text" placeholder="Asia/Kolkata">
           <label class="check" for="FLYERS_ENABLED" style="margin-top:14px"><input id="FLYERS_ENABLED" type="checkbox"> Post marketing flyers between the news</label>
+          <label class="check" for="BREAKING_NEWS" style="margin-top:8px"><input id="BREAKING_NEWS" type="checkbox"> Breaking news first: a big outage or hack that several outlets confirm skips the queue and the gap between posts</label>
           <div class="row"><button class="btn" type="button" onclick="save(NEWSROOM_KEYS,'nr-msg')">Save</button></div>
           <div id="nr-msg" class="msg" role="status" aria-live="polite"></div>
         </div>
@@ -1589,7 +1592,7 @@
   const REEL_TRACK_LABELS = { {% for k, l in reel_tracks %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
   const REEL_FRAME_LABELS = { {% for k, l in reel_frames %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
   const REEL_THEME_LABELS = { {% for k, l in flyer_layouts %}"{{ k }}": "{{ l }}"{% if not loop.last %}, {% endif %}{% endfor %} };
-  const NEWSROOM_KEYS = ["BLOCKED_WORDS","WATCHDOG_MINUTES","SCAN_INTERVAL_MINUTES","SCAN_MAX_AGE_HOURS","SCAN_MIN_SCORE","REVIEW_MIN_SCORE","FLYER_AFTER_NEWS","APPROVAL_QUEUE_MAX","TIMEZONE","FLYERS_ENABLED"];
+  const NEWSROOM_KEYS = ["BLOCKED_WORDS","WATCHDOG_MINUTES","SCAN_INTERVAL_MINUTES","SCAN_MAX_AGE_HOURS","SCAN_MIN_SCORE","REVIEW_MIN_SCORE","FLYER_AFTER_NEWS","APPROVAL_QUEUE_MAX","NEWS_DRAFT_MAX_HOURS","TIMEZONE","FLYERS_ENABLED","BREAKING_NEWS"];
   const NOTIFY_KEYS = ["PUBLIC_URL","NOTIFY_EMAIL_TO","SMTP_HOST","SMTP_PORT","SMTP_USER","SMTP_PASSWORD","SMTP_FROM","WHATSAPP_PROVIDER","WHATSAPP_TO","WHATSAPP_APIKEY","TWILIO_SID","TWILIO_WHATSAPP_FROM","TELEGRAM_BOT_TOKEN","TELEGRAM_CHAT_ID","NOTIFY_WEBHOOK_URL"];
   const PENDING = {{ status.pending }}, REELS_PENDING = {{ status.reels_pending }}, CHANNELS = {{ status.notify|tojson }};
   const OFFSITE_KEYS = ["BACKUP_S3_ENDPOINT","BACKUP_S3_BUCKET","BACKUP_S3_ID","BACKUP_S3_SECRET","BACKUP_COPY_DIR"];
@@ -1754,11 +1757,11 @@
   async function loadSettings() {
     const [ok, d] = await api("/api/settings"); if (!ok) { $("ig-user").textContent = "–"; return; }
     const s = d.settings;
-    for (const k of ["BLOCKED_WORDS", "LLM2_BASE_URL", "LLM2_MODEL", "WATCHDOG_MINUTES", "NVIDIA_MODEL", "IG_USERNAME", "IG_HANDLE", "IG_DELIVERY", "POSTS_PER_DAY", "MIN_POST_GAP_MINUTES", "LINKEDIN_AUTHOR", "APPROVAL_MODE", "SCAN_INTERVAL_MINUTES", "SCAN_MAX_AGE_HOURS", "SCAN_MIN_SCORE", "REVIEW_MIN_SCORE", "FLYER_AFTER_NEWS", "APPROVAL_QUEUE_MAX", "TIMEZONE", "BRAND_EMAIL", "BRAND_SITE", "FLYER_HASHTAGS", "BACKUP_S3_ENDPOINT", "BACKUP_S3_BUCKET", "BACKUP_COPY_DIR", "GOOGLE_CLIENT_ID", "PUBLIC_URL", "NOTIFY_EMAIL_TO", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_FROM", "WHATSAPP_PROVIDER", "WHATSAPP_TO", "TWILIO_SID", "TWILIO_WHATSAPP_FROM", "TELEGRAM_CHAT_ID"]) $(k).value = s[k];
+    for (const k of ["BLOCKED_WORDS", "LLM2_BASE_URL", "LLM2_MODEL", "WATCHDOG_MINUTES", "NVIDIA_MODEL", "IG_USERNAME", "IG_HANDLE", "IG_DELIVERY", "POSTS_PER_DAY", "MIN_POST_GAP_MINUTES", "LINKEDIN_AUTHOR", "APPROVAL_MODE", "SCAN_INTERVAL_MINUTES", "SCAN_MAX_AGE_HOURS", "SCAN_MIN_SCORE", "REVIEW_MIN_SCORE", "FLYER_AFTER_NEWS", "APPROVAL_QUEUE_MAX", "NEWS_DRAFT_MAX_HOURS", "TIMEZONE", "BRAND_EMAIL", "BRAND_SITE", "FLYER_HASHTAGS", "BACKUP_S3_ENDPOINT", "BACKUP_S3_BUCKET", "BACKUP_COPY_DIR", "GOOGLE_CLIENT_ID", "PUBLIC_URL", "NOTIFY_EMAIL_TO", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_FROM", "WHATSAPP_PROVIDER", "WHATSAPP_TO", "TWILIO_SID", "TWILIO_WHATSAPP_FROM", "TELEGRAM_CHAT_ID"]) $(k).value = s[k];
     for (const [k, id] of [["SMTP_PASSWORD", "smtp-state"], ["WHATSAPP_APIKEY", "wa-state"], ["TELEGRAM_BOT_TOKEN", "tg-state"], ["NOTIFY_WEBHOOK_URL", "wh-state"], ["BACKUP_S3_ID", "s3id-state"], ["BACKUP_S3_SECRET", "s3sec-state"], ["HEARTBEAT_URL", "hb-state"], ["GOOGLE_CLIENT_SECRET", "gsec-state"]]) $(id).textContent = s[k + "_set"] ? "(saved)" : "(not set)";
     for (const k of REEL_KEYS) if ($(k) && s[k] !== undefined) $(k).value = s[k];
     $("nt-active").textContent = CHANNELS.length ? CHANNELS.join(", ") : "none yet";
-    $("LINKEDIN_ENABLED").checked = !!s.LINKEDIN_ENABLED; $("FLYERS_ENABLED").checked = !!s.FLYERS_ENABLED;
+    $("LINKEDIN_ENABLED").checked = !!s.LINKEDIN_ENABLED; $("FLYERS_ENABLED").checked = !!s.FLYERS_ENABLED; $("BREAKING_NEWS").checked = !!s.BREAKING_NEWS;
     $("li-state").textContent = s.LINKEDIN_ACCESS_TOKEN_set ? "(saved)" : "(not set)";
     $("l2-state").textContent = s.LLM2_API_KEY_set ? "(saved)" : "(not set)";
     $("key-state").textContent = s.NVIDIA_API_KEY_set ? "(saved " + s.NVIDIA_API_KEY + ")" : "(not set)";

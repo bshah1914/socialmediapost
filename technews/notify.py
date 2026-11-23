@@ -76,10 +76,18 @@ def buttons(post_id: int) -> str:
     return json.dumps({"inline_keyboard": rows})
 
 
-def _telegram(title: str, text: str, image: Path | None, post_id: int = 0) -> None:
+def story_buttons(story_id: int) -> str:
+    """The button under a "possibly missed" alert: make the story into a post."""
+    rows: list[list[dict[str, str]]] = [[{"text": "\U0001f4dd Make a post", "callback_data": f"md:{story_id}"}]]
+    if link().startswith("https://"):
+        rows.append([{"text": "Open in the dashboard", "url": link()}])
+    return json.dumps({"inline_keyboard": rows})
+
+
+def _telegram(title: str, text: str, image: Path | None, post_id: int = 0, markup: str = "") -> None:
     base = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}"
     body = f"{title}\n\n{text}"
-    extra = {"reply_markup": buttons(post_id)} if post_id else {}
+    extra = {"reply_markup": markup} if markup else {"reply_markup": buttons(post_id)} if post_id else {}
     if image and image.exists():
         video = image.suffix.lower() == ".mp4"
         with open(image, "rb") as fh:
@@ -126,13 +134,14 @@ def _app(title: str, text: str, image: Path | None) -> None:
 SENDERS: Final = {"app": _app, "email": _email, "telegram": _telegram, "webhook": _webhook, "whatsapp": _whatsapp}
 
 
-def send(title: str, text: str, image: Path | None = None, post_id: int = 0) -> dict[str, str]:
-    """Send to every set-up channel; returns ``{channel: "sent" | error}``. With ``post_id`` Telegram gets Approve and Reject buttons."""
+def send(title: str, text: str, image: Path | None = None, post_id: int = 0, *, markup: str = "") -> dict[str, str]:
+    """Send to every set-up channel; returns ``{channel: "sent" | error}``. With ``post_id`` Telegram gets Approve and Reject
+    buttons; ``markup`` gives it other buttons instead."""
     out: dict[str, str] = {}
     for name in channels():
         try:
             if name == "telegram":
-                _telegram(title, text, image, post_id)
+                _telegram(title, text, image, post_id, markup)
             else:
                 SENDERS[name](title, text, image)
             out[name] = "sent"
@@ -153,12 +162,14 @@ def draft_ready(headline: str, kind: str, image: Path | None, *, wait: bool = Fa
     caption = ""
     if post_id and (found := db.rows("SELECT caption FROM posts WHERE id = ?", post_id)):
         caption = str(found[0]["caption"] or "").strip()
-    label = {"flyer": "Flyer", "animated flyer": "Animated flyer (Reel)", "animated news": "Animated news post (Reel)"}.get(kind, "News post")
+    label = {"flyer": "Flyer", "animated flyer": "Animated flyer (Reel)", "animated news": "Animated news post (Reel)",
+             "breaking": "\U0001f6a8 BREAKING news post"}.get(kind, "News post")  # fmt: skip
     text = f"{label}: {headline}\n\n"
     if caption:
         text += f"Caption:\n{caption[:560]}{'...' if len(caption) > 560 else ''}\n\n"
     text += f"Review and approve: {where}" if where else "Open the dashboard, Approvals, to review it."
-    job = threading.Thread(target=send, args=("CloudTrio: a post is waiting for your approval", text, image, post_id), daemon=True)
+    title = "CloudTrio: BREAKING news is waiting for your approval" if kind == "breaking" else "CloudTrio: a post is waiting for your approval"
+    job = threading.Thread(target=send, args=(title, text, image, post_id), daemon=True)
     job.start()
     if wait:
         job.join()

@@ -20,6 +20,38 @@ from technews.config import settings
 
 logger = logging.getLogger(__name__)
 
+RETIRED_KEY = "llm:retired"
+RETIRED_SKIP = 24 * 3600  # a model NVIDIA has retired (410) or removed (404) is not asked again for a day
+_retired: dict[str, float] = {}
+
+
+def _skip(model: str) -> bool:
+    return time.time() - _retired.get(model, 0) < RETIRED_SKIP
+
+
+def _note_retired(model: str, error: str) -> None:
+    """Remember a retired model: skipped here, and listed for the watchdog, which tells the editor. Never raises."""
+    _retired[model] = time.time()
+    try:
+        from technews import db
+
+        gone = json.loads(db.kv_get(RETIRED_KEY) or "{}")
+        gone[model] = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "error": error[:160]}
+        db.kv_set(RETIRED_KEY, json.dumps(gone))
+    except Exception:  # noqa: BLE001
+        logger.exception("llm.retired_note_failed")
+
+
+def retired() -> dict[str, dict[str, str]]:
+    """Models in the chain that NVIDIA said are gone, with when and why."""
+    try:
+        from technews import db
+
+        gone = json.loads(db.kv_get(RETIRED_KEY) or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+    return {m: v for m, v in gone.items() if m in model_chain()}
+
 
 class LLMError(RuntimeError):
     """Transport, protocol or parse failure talking to the model."""
@@ -83,11 +115,15 @@ def chat_json(*, system: str, user: str, max_tokens: int = 2000, temperature: fl
         raise LLMError("no NVIDIA_API_KEY configured")
     errors = []
     for model in model_chain() if settings.NVIDIA_API_KEY else []:
+        if _skip(model):
+            continue
         try:
             return _chat_once(system, user, model, max_tokens, temperature)
         except LLMError as exc:
             logger.warning("llm.model_failed model=%s error=%s", model, str(exc)[:200])
             errors.append(f"{model}: {exc}")
+            if str(exc).startswith(("HTTP 410", "HTTP 404")):  # retired or removed: no point asking again
+                _note_retired(model, str(exc))
     if second_ready():  # the other provider only gets a turn when NVIDIA could not answer
         try:
             result = _chat_once(system, user, settings.LLM2_MODEL, max_tokens, temperature,

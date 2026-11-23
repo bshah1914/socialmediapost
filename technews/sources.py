@@ -14,6 +14,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from typing import Final
 from urllib.parse import urlparse
 
@@ -49,6 +50,7 @@ FEEDS: Final[dict[str, str]] = {
     "CNCF": "https://www.cncf.io/feed/",
     "Kubernetes Blog": "https://kubernetes.io/feed.xml",
     "HashiCorp Blog": "https://www.hashicorp.com/blog/feed.xml",
+    "Google News Technology": "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en",
 }
 
 GOOGLE_NEWS: Final = "https://news.google.com/rss/search"
@@ -73,7 +75,19 @@ SEARCHES: Final[tuple[str, ...]] = (
     "OpenAI OR Nvidia OR Google OR Microsoft OR Apple OR Meta announces",
     "crypto exchange hacked",
     "viral tech",
+    "Microsoft outage OR \"Microsoft 365\" down OR Outlook down OR Teams down",
+    "AWS outage OR \"Google Cloud\" outage OR Cloudflare outage OR GitHub outage",
+    "OpenAI OR ChatGPT outage OR down",
+    "global IT outage OR \"services down\" OR \"systems down\"",
+    "CISA warns OR \"actively exploited\"",
 )
+
+#: Sources added after the first start. Each set goes in once (a database seeded before it lacks them); removing one
+#: later keeps it removed.
+ADDED: Final[dict[str, tuple[tuple[str, str, str], ...]]] = {
+    "v2": (("feed", "Google News Technology", FEEDS["Google News Technology"]),
+           *(("search", "", q) for q in SEARCHES[-5:])),
+}  # fmt: skip
 
 #: Outlets whose word is enough on its own; anything else wants a second outlet. The names of
 #: the feeds you follow count too (see ``trusted_outlets``).
@@ -90,8 +104,48 @@ TRUSTED_EXTRA: Final = frozenset(
                  "HashiCorp", "The Hacker News", "BleepingComputer", "Dark Reading", "SecurityWeek", "TechCrunch",
                  "The Verge", "Ars Technica", "Wired", "CyberSecurityNews", "Hackread", "The Cloudflare Blog",
                  "Platform Engineering", "DevOps Digest", "TechTarget", "Cloud Computing News", "Forbes", "Fortune",
-                 "SiliconANGLE & theCUBE", "Techzine Global", "The Next Platform", "The Stack")
+                 "SiliconANGLE & theCUBE", "Techzine Global", "The Next Platform", "The Stack",
+                 # the big general newsrooms (as Google News names them): an outage or hack they report is real
+                 "AP News", "CNN", "NBC News", "CBS News", "ABC News", "NPR", "The New York Times", "The Washington Post",
+                 "The Wall Street Journal", "Financial Times", "USA Today", "Sky News", "Al Jazeera", "The Independent",
+                 "The Telegraph", "Business Insider", "Yahoo Finance", "Yahoo News", "Fox Business", "Fox News", "MarketWatch",
+                 "Newsweek", "TIME", "The Economist", "Politico", "Semafor", "The Information", "BBC News", "Euronews",
+                 "Mashable", "Tom's Hardware", "Tom's Guide", "PCWorld", "PCMag", "Windows Central", "Neowin", "Windows Report",
+                 "9to5Mac", "9to5Google", "MacRumors", "Android Authority", "Gizmodo", "CNET", "Digital Trends", "Lifehacker",
+                 "NDTV", "The Times of India", "Times of India", "Hindustan Times", "The Hindu", "The Economic Times",
+                 "Economic Times", "ETCIO", "ETTelecom", "Mint", "Livemint", "Business Standard", "Moneycontrol", "India Today",
+                 "The Indian Express", "Indian Express", "Firstpost", "News18", "CNBC TV18", "Deccan Herald", "Business Today",
+                 "Gadgets 360", "DD News", "The Straits Times", "South China Morning Post", "The Japan Times", "ABC (Australia)",
+                 "The Sydney Morning Herald", "CBC", "Global News")
 )  # fmt: skip
+
+#: Big companies, with their products folded in, so "Outlook down" and "Microsoft outage" name the same company.
+COMPANIES: Final[dict[str, str]] = {
+    # (no plain words like "teams", "office", "delta", "visa": "IT teams hit by ransomware" is not about Microsoft)
+    **dict.fromkeys(("microsoft", "azure", "outlook", "windows", "xbox", "copilot", "bing", "linkedin"), "microsoft"),
+    **dict.fromkeys(("aws", "amazon", "alexa"), "amazon"),
+    **dict.fromkeys(("google", "gcp", "gmail", "youtube", "android", "chrome", "gemini"), "google"),
+    **dict.fromkeys(("meta", "facebook", "instagram", "whatsapp"), "meta"),
+    **dict.fromkeys(("openai", "chatgpt"), "openai"),
+    **dict.fromkeys(("apple", "icloud", "iphone", "ios"), "apple"),
+    **dict.fromkeys(("anthropic", "claude"), "anthropic"),
+    **dict.fromkeys(("sony", "playstation", "psn"), "sony"),
+    **dict.fromkeys(("twitter",), "x"),
+    **{c: c for c in ("cloudflare", "github", "gitlab", "crowdstrike", "oracle", "salesforce", "slack", "zoom", "nvidia", "intel",
+                      "cisco", "fortinet", "okta", "ibm", "sap", "vmware", "broadcom", "atlassian", "jira", "discord", "netflix",
+                      "spotify", "verizon", "t-mobile", "starlink", "tesla", "samsung", "huawei", "tiktok", "paypal",
+                      "mastercard", "stripe", "shopify", "akamai", "fastly", "docker", "kubernetes", "jio", "airtel",
+                      "vodafone", "upi", "paytm", "zerodha", "ivanti", "citrix", "sophos", "snowflake", "dell",
+                      "lenovo", "reddit", "roblox", "ticketmaster", "ryanair", "heathrow")},
+}  # fmt: skip
+#: Kinds of incident. Two headlines that name the same company and the same kind are one event.
+INCIDENTS: Final[dict[str, str]] = {
+    **dict.fromkeys(("outage", "outages", "disruption", "disruptions", "disrupted", "disrupts", "offline", "glitch", "blackout"), "outage"),
+    # (not "leak": an iPhone design leak is not a breach)
+    **dict.fromkeys(("breach", "breached", "hacked", "cyberattack", "cyber-attack", "ransomware", "compromised"), "breach"),
+    **dict.fromkeys(("zero-day", "0-day", "exploited"), "exploit"),
+}  # fmt: skip
+_DOWN: Final = re.compile(r"\b(?:is|are|was|were|went|goes|go|going)\s+down\b|\bdown\s+(?:for|worldwide|globally|again|across|in)\b|\bnot working\b")
 
 
 @dataclass(slots=True)
@@ -154,13 +208,23 @@ _trusted_cache: frozenset[str] | None = None
 
 def seed() -> None:
     """The first time, the built-in feeds and searches go into the database; after that it is yours."""
-    if db.kv_get("sources:seeded"):
+    global _trusted_cache
+    if not db.kv_get("sources:seeded"):
+        for name, url in FEEDS.items():
+            db.execute("INSERT OR IGNORE INTO sources (kind, name, value) VALUES ('feed', ?, ?)", name, url)
+        for query in SEARCHES:
+            db.execute("INSERT OR IGNORE INTO sources (kind, name, value) VALUES ('search', '', ?)", query)
+        db.kv_set("sources:seeded", "1")
+        for version in ADDED:
+            db.kv_set(f"sources:seeded:{version}", "1")
         return
-    for name, url in FEEDS.items():
-        db.execute("INSERT OR IGNORE INTO sources (kind, name, value) VALUES ('feed', ?, ?)", name, url)
-    for query in SEARCHES:
-        db.execute("INSERT OR IGNORE INTO sources (kind, name, value) VALUES ('search', '', ?)", query)
-    db.kv_set("sources:seeded", "1")
+    for version, rows in ADDED.items():
+        if db.kv_get(f"sources:seeded:{version}"):
+            continue
+        for kind, name, value in rows:
+            db.execute("INSERT OR IGNORE INTO sources (kind, name, value) VALUES (?, ?, ?)", kind, name, value)
+        db.kv_set(f"sources:seeded:{version}", "1")
+        _trusted_cache = None
 
 
 def listing() -> list[dict]:
@@ -234,6 +298,8 @@ def _get(url: str, **params: str) -> str:
 
 def _fetch_feed(source: str, url: str) -> list[FeedItem]:
     try:
+        if "news.google.com/" in url:  # a Google News page (top headlines, a topic): each item names its own outlet
+            return parse_feed(source, _get(url), google=True)
         return parse_feed(source, _get(url))
     except requests.HTTPError as exc:
         if exc.response is None or exc.response.status_code not in BLOCKED:
@@ -321,6 +387,13 @@ def same_story(a: str, b: str) -> bool:
     wa, wb = words(a) - GENERIC, words(b) - GENERIC
     if not wa or not wb:
         return False
+    # A company's incident is only ever the same story as a headline that names that company: "Slack is down
+    # worldwide" is neither "WhatsApp down worldwide" nor "How to prepare for the next internet outage".
+    ea, eb = event(a), event(b)
+    if ea and not {c for c, _ in ea} & companies(b) or eb and not {c for c, _ in eb} & companies(a):
+        return False
+    if ea and eb and not ea & eb:
+        return False
     shared = len(wa & wb)
     return shared >= 2 and shared / min(len(wa), len(wb)) >= 0.4
 
@@ -346,12 +419,38 @@ def same_subject(title: str, other: str) -> bool:
     return len((words(title) - GENERIC) & (words(other) - GENERIC) - shared_names) >= 1
 
 
+@lru_cache(maxsize=4096)
+def companies(title: str) -> frozenset[str]:
+    """The big companies a headline names, products folded in ("Outlook" -> microsoft)."""
+    return frozenset(COMPANIES[t] for t in re.findall(r"[a-z0-9\-]+", title.lower()) if t in COMPANIES)
+
+
+@lru_cache(maxsize=4096)
+def event(title: str) -> frozenset[tuple[str, str]]:
+    """The incidents a headline reports, as (company, kind): "Outlook and Teams down for hours" ->
+    {("microsoft", "outage")}. Empty for a headline that reports no outage, breach or exploit at a known company."""
+    low = title.lower()
+    tokens = set(re.findall(r"[a-z0-9\-]+", low))
+    kinds = {INCIDENTS[t] for t in tokens if t in INCIDENTS} | ({"outage"} if _DOWN.search(low) else set())
+    return frozenset((c, k) for c in companies(title) for k in kinds)
+
+
+def same_event(a: str, b: str) -> bool:
+    """Two headlines about one incident, however differently worded: the same company, the same kind of incident
+    ("Microsoft outage cause revealed" ~ "Outlook, Teams down for five hours"). The caller keeps them close in time."""
+    return bool(event(a) & event(b))
+
+
+def related(a: str, b: str) -> bool:
+    return same_story(a, b) or same_event(a, b)
+
+
 def group(items: list[FeedItem]) -> list[Story]:
     """One Story per subject, earliest report first, with every outlet that ran it. The
     story keeps the first item that has a summary (feeds have one, Google News has none)."""
     stories: list[Story] = []
     for item in sorted(items, key=lambda i: i.published_at):
-        match = next((s for s in stories if any(same_story(item.title, t) for t in s.titles)), None)
+        match = next((s for s in stories if any(related(item.title, t) for t in s.titles)), None)
         if match is None:
             stories.append(Story(item.title, item.url, item.source, item.summary, item.published_at,
                                  [item.source], [item.title]))  # fmt: skip

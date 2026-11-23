@@ -41,6 +41,21 @@ def _cutoff(hours: float) -> str:
     return (datetime.now(UTC) - timedelta(hours=hours)).isoformat(timespec="seconds")
 
 
+EVENT_HOURS: Final = 36  # reports of one incident (company + outage / breach / exploit) this close together are one story
+#: Reasons a story is never reopened, however many outlets pick it up.
+FINAL_REASONS: Final = ("rejected by the editor", "already posted", "brand rules", "draft expired")
+
+
+def _another_look(story: dict[str, Any], before: int, now: int) -> bool:
+    """Whether a story turned down earlier deserves a second review now that more outlets carry it: the first
+    confirmation of a "single unverified source", and again at 3 and at 6 outlets."""
+    if story["status"] not in ("rejected", "low") or str(story["review_reason"] or "").startswith(FINAL_REASONS):
+        return False
+    if story["review_reason"] == "single unverified source" and before < 2 <= now:
+        return True
+    return before < 3 <= now or before < 6 <= now
+
+
 # --------------------------------------------------------------------------- scan
 
 
@@ -48,11 +63,15 @@ def scan() -> dict[str, int]:
     """Fetch, group, drop what is already stored, and have the scanner score the rest."""
     items = sources.fetch_all(timedelta(hours=settings.SCAN_MAX_AGE_HOURS))
     stories = sources.group(items)
-    known = db.rows("SELECT id, key, title, titles, outlets FROM stories WHERE found_at >= ?", _cutoff(48))
+    known = db.rows("SELECT id, key, title, titles, outlets, status, review_reason, published_at FROM stories WHERE found_at >= ?", _cutoff(48))
     fresh: list[sources.Story] = []
     for story in stories:
         match = next((k for k in known if k["key"] == story.key or any(
             sources.same_story(t, title) for t in story.titles for title in [k["title"], *k["titles"][:10]])), None)  # fmt: skip
+        if match is None:  # the same incident told in other words ("Outlook down" / "Microsoft outage"), close in time
+            near = _cutoff(EVENT_HOURS)
+            match = next((k for k in known if k["published_at"] >= near and any(
+                sources.same_event(t, title) for t in story.titles for title in [k["title"], *k["titles"][:10]])), None)  # fmt: skip
         if match is None:
             fresh.append(story)
             continue
@@ -60,7 +79,13 @@ def scan() -> dict[str, int]:
         outlets = list(dict.fromkeys([*match["outlets"], *story.outlets]))
         if len(outlets) > len(match["outlets"]):
             titles = list(dict.fromkeys([*match["titles"], *story.titles]))[:20]
-            db.update_story(match["id"], outlets=json.dumps(outlets), titles=json.dumps(titles))
+            changes: dict[str, Any] = {"outlets": json.dumps(outlets), "titles": json.dumps(titles)}
+            if _another_look(match, len(match["outlets"]), len(outlets)):
+                # turned down when few had it; now many do, so the reviewer reads it again, as current news
+                changes |= {"status": "new", "review_reason": "", "published_at": story.published_at.isoformat(timespec="seconds")}
+                logger.info("pipeline.rereview story=%s outlets=%d", match["id"], len(outlets))
+            db.update_story(match["id"], **changes)
+            match["outlets"], match["titles"] = outlets, titles
     scans: list[Any] = []
     if fresh:
         with team.run("scanner") as info:
@@ -115,15 +140,16 @@ def posts_today() -> int:
     return int(found[0]["n"])
 
 
-def pacing() -> tuple[bool, str]:
-    """Whether a post may go out now, and why not."""
+def pacing(*, breaking: bool = False) -> tuple[bool, str]:
+    """Whether a post may go out now, and why not. Breaking news has a little room past the daily cap and a short gap."""
     if (left := instagram.paused()) > 0:
         return False, f"Instagram pause, {left / 60:.0f} min left"
-    if posts_today() >= settings.POSTS_PER_DAY:
+    if posts_today() >= settings.POSTS_PER_DAY + (BREAKING_EXTRA if breaking else 0):
         return False, f"daily cap of {settings.POSTS_PER_DAY} reached"
     last = db.kv_get(LAST_POST_KEY + brands.suffix())
     if last:
-        wait = datetime.fromisoformat(last) + timedelta(minutes=settings.MIN_POST_GAP_MINUTES) - datetime.now(UTC)
+        gap = min(BREAKING_GAP_MINUTES, settings.MIN_POST_GAP_MINUTES) if breaking else settings.MIN_POST_GAP_MINUTES
+        wait = datetime.fromisoformat(last) + timedelta(minutes=gap) - datetime.now(UTC)
         if wait.total_seconds() > 0:
             return False, f"next post in {wait.total_seconds() / 60:.0f} min (gap)"
     return True, "ok"
@@ -196,13 +222,40 @@ def needs_approval(*, flyer: bool) -> bool:
     return settings.APPROVAL_MODE == "all" or (settings.APPROVAL_MODE == "flyers" and flyer)
 
 
-def pending_count() -> int:
-    return int(db.rows("SELECT COUNT(*) AS n FROM posts WHERE status = 'pending' AND brand_id = ?", settings.BRAND_ID)[0]["n"])
+def pending_count(*, flyer: bool | None = None) -> int:
+    """Drafts waiting for approval: all of them, or only flyers (``flyer=True``) or only news (``flyer=False``)."""
+    kind = "" if flyer is None else " AND flyer != ''" if flyer else " AND flyer = ''"
+    return int(db.rows(f"SELECT COUNT(*) AS n FROM posts WHERE status = 'pending' AND brand_id = ?{kind}", settings.BRAND_ID)[0]["n"])  # noqa: S608 - fixed text
 
 
-def _insert_draft(story_id: int, headline: str, caption: str, image: Any, writer_name: str, flyer_id: str = "", meta: str = "") -> int:
+def expire_stale_drafts() -> list[str]:
+    """Withdraw news drafts that have waited longer than NEWS_DRAFT_MAX_HOURS: the news is old by then, and a full
+    queue would stop every newer story. Flyers and reposts wait as long as you like. Returns the withdrawn headlines."""
+    hours = settings.NEWS_DRAFT_MAX_HOURS
+    if hours <= 0:
+        return []
+    gone: list[str] = []
+    with APPROVE_LOCK:
+        for p in db.rows("SELECT * FROM posts WHERE status = 'pending' AND flyer = '' AND story_id > 0 AND created_at < ? AND brand_id = ?",
+                         _cutoff(hours), settings.BRAND_ID):  # fmt: skip
+            if draft_meta(p).get("repost_of"):
+                continue
+            db.execute("UPDATE posts SET status = 'expired', error = ? WHERE id = ? AND status = 'pending'",
+                       f"Withdrawn: it waited over {hours} hours for approval, so the news was no longer fresh.", p["id"])  # fmt: skip
+            db.update_story(p["story_id"], status="rejected", review_reason="draft expired")
+            gone.append(p["headline"])
+    if gone:
+        logger.info("pipeline.drafts_expired count=%d", len(gone))
+        notify.send("CloudTrio: old news drafts withdrawn",
+                    f"{len(gone)} news draft(s) waited over {hours} hours for approval and were withdrawn, so newer stories can come "
+                    "through:\n- " + "\n- ".join(gone[:8]))  # fmt: skip
+    return gone
+
+
+def _insert_draft(story_id: int, headline: str, caption: str, image: Any, writer_name: str, flyer_id: str = "", meta: str = "",
+                  *, breaking: bool = False) -> int:  # fmt: skip
     post_id = _save_draft(story_id, headline, caption, image, writer_name, flyer_id, meta)
-    media, kind = Path(str(image)), "flyer" if flyer_id else "news"
+    media, kind = Path(str(image)), "flyer" if flyer_id else "breaking" if breaking else "news"
     if reel_wanted():
         out = make_reel(post_id)
         if out["ok"]:
@@ -367,8 +420,8 @@ def _save_draft(story_id: int, headline: str, caption: str, image: Any, writer_n
     )  # fmt: skip
 
 
-def draft_story(story_id: int) -> dict[str, Any]:
-    """Write and render a story, then hold it for approval."""
+def draft_story(story_id: int, *, breaking: bool = False) -> dict[str, Any]:
+    """Write and render a story, then hold it for approval (flagged as breaking news when it is)."""
     story = db.story(story_id)
     if story is None or story["status"] != "approved":
         return {"posted": False, "reason": "story is not approved"}
@@ -377,8 +430,8 @@ def draft_story(story_id: int) -> dict[str, Any]:
     image = _render_news(story_id, story, draft, layout["layout"])
     warnings = editor.review(draft.headline, draft.points, draft.full_caption(), story) if team.enabled("editor") else rules.warnings(draft.headline, draft.points, story)
     meta = json.dumps({"points": draft.points, "category": story["category"], "source": story["source"], "warnings": warnings,
-                       "layout": layout["layout"], "designer": layout["reason"]})  # fmt: skip
-    post_id = _insert_draft(story_id, draft.headline, draft.full_caption(), image, draft.writer, meta=meta)
+                       "layout": layout["layout"], "designer": layout["reason"], **({"breaking": True} if breaking else {})})  # fmt: skip
+    post_id = _insert_draft(story_id, draft.headline, draft.full_caption(), image, draft.writer, meta=meta, breaking=breaking)
     db.update_story(story_id, status="pending")
     logger.info("pipeline.drafted story=%s post=%s", story_id, post_id)
     return {"posted": False, "pending": True, "post_id": post_id, "reason": "waiting for approval"}
@@ -646,35 +699,82 @@ def repost(post_id: int, *, replace: bool = False) -> dict[str, Any]:
         return {"ok": True, "post_id": new_id, "replaces": bool(meta.get("replaces"))}
 
 
-def post_next() -> dict[str, Any]:
-    ok, why = pacing()
-    if not ok:
-        return {"posted": False, "reason": why}
-    flyer_turn = next_is_flyer()
-    if needs_approval(flyer=flyer_turn) and pending_count() >= settings.APPROVAL_QUEUE_MAX:
-        return {"posted": False, "reason": f"{pending_count()} posts waiting for your approval"}
-    if flyer_turn:
-        return draft_flyer() if needs_approval(flyer=True) else publish_flyer()
+BREAKING_HOURS: Final = 8  # a breaking story is this fresh at most
+BREAKING_EXTRA: Final = 2  # breaking news may go past the daily cap by this many posts
+BREAKING_GAP_MINUTES: Final = 20  # and needs only this long since the last post
+
+
+def is_breaking(story: dict[str, Any]) -> bool:
+    """Big, confirmed and fresh: an outage, breach or exploit at a big company that 3+ outlets report and the reviewer
+    scored 8+, or any story 4+ outlets report that the reviewer scored 9+."""
+    if not settings.BREAKING_NEWS or story["published_at"] < _cutoff(BREAKING_HOURS):
+        return False
+    score, outlets = float(story.get("review_score") or 0), len(story.get("outlets") or [])
+    return (bool(sources.event(story["title"])) and outlets >= 3 and score >= 8) or (outlets >= 4 and score >= 9)
+
+
+def _postable(*, breaking: bool = False) -> dict[str, Any] | None:
+    """The next approved story to post (only a breaking one with ``breaking``). Stories this page already covered, or
+    that the brand rules block, are set aside on the way."""
     approved = db.rows(
-        "SELECT id, title, category, summary FROM stories WHERE status = 'approved' AND published_at >= ? "
+        "SELECT id, title, category, summary, outlets, review_score, published_at FROM stories WHERE status = 'approved' AND published_at >= ? "
         "ORDER BY category IN ('cloud', 'devops', 'ai') DESC, review_score DESC, published_at DESC",
         _cutoff(settings.SCAN_MAX_AGE_HOURS),
-    )
-    posted = [r["title"] for r in db.rows("SELECT title FROM stories WHERE status = 'posted' AND found_at >= ?", _cutoff(48))]
+    )  # fmt: skip
+    posted = [r["title"] for r in db.rows("SELECT title FROM stories WHERE status IN ('posted', 'pending') AND found_at >= ?", _cutoff(48))]
     tags = brands.categories(brands.current())
     for story in approved:
         if tags and story["category"] not in tags:  # another brand's story
             continue
+        if breaking and not is_breaking(story):
+            continue
         # One subject told in different words (GMO "warns users" / "refuses demands") is
         # posted once: the page already covered it.
-        if any(sources.same_subject(story["title"], p) or sources.same_story(story["title"], p) for p in posted):
+        if any(sources.same_subject(story["title"], p) or sources.related(story["title"], p) for p in posted):
             db.update_story(story["id"], status="rejected", review_reason="already posted this subject")
             continue
         if word := rules.blocked(story["title"], story.get("summary") or ""):
             db.update_story(story["id"], status="rejected", review_reason=f"brand rules: blocked word '{word}'")
             continue
-        return draft_story(story["id"]) if needs_approval(flyer=False) else publish_story(story["id"])
-    return {"posted": False, "reason": "no approved story waiting"}
+        return story
+    return None
+
+
+def _post_story(story_id: int, *, breaking: bool = False) -> dict[str, Any]:
+    return draft_story(story_id, breaking=breaking) if needs_approval(flyer=False) else publish_story(story_id)
+
+
+def post_next() -> dict[str, Any]:
+    expire_stale_drafts()
+    # Breaking news does not wait for the gap between posts or for the queue of drafts.
+    if pacing(breaking=True)[0] and (hot := _postable(breaking=True)):
+        logger.info("pipeline.breaking story=%s", hot["id"])
+        return {**_post_story(hot["id"], breaking=True), "breaking": True}
+    ok, why = pacing()
+    if not ok:
+        return {"posted": False, "reason": why}
+    flyer_turn = next_is_flyer()
+    # The queue is per kind: a flyer waiting for approval never holds up the news, nor news a flyer.
+    if needs_approval(flyer=flyer_turn) and (waiting := pending_count(flyer=flyer_turn)) >= settings.APPROVAL_QUEUE_MAX:
+        return {"posted": False, "reason": f"{waiting} {'flyers' if flyer_turn else 'news posts'} waiting for your approval"}
+    if flyer_turn:
+        return draft_flyer() if needs_approval(flyer=True) else publish_flyer()
+    story = _postable()
+    return _post_story(story["id"]) if story else {"posted": False, "reason": "no approved story waiting"}
+
+
+def draft_missed(story_id: int) -> dict[str, Any]:
+    """The editor asked for a story the newsroom passed over (the "possibly missed" alert): make it into a draft now,
+    and remember it, so the reviewer learns what this page wants."""
+    story = db.story(story_id)
+    if story is None:
+        return {"posted": False, "reason": "That story is gone."}
+    if story["status"] in ("pending", "posted"):
+        return {"posted": False, "reason": "That story is already " + ("waiting for approval." if story["status"] == "pending" else "posted.")}
+    team.feedback("missed", 0, headline=story["title"], category=story["category"])
+    db.update_story(story_id, status="approved", review_reason="picked by the editor (missed story)")
+    with brands.use(brands.DEFAULT_ID):
+        return _post_story(story_id, breaking=is_breaking({**story, "review_score": max(8.0, float(story.get("review_score") or 0))}))
 
 
 def publish_story(story_id: int) -> dict[str, Any]:

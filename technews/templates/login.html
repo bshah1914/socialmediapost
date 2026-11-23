@@ -56,10 +56,15 @@
   .tag { align-self:flex-start; background:#2fd4c4; color:#04202a; font-weight:800; font-size:.78em; letter-spacing:.9px; padding:8px 16px; border-radius:99px; margin-bottom:26px; }
   .show-side h2 { font-size:clamp(2em,3.6vw,3.3em); font-weight:800; line-height:1.08; letter-spacing:-.035em; margin:0 0 14px; max-width:14ch; }
   .rule { width:120px; height:5px; border-radius:4px; background:#2fd4c4; margin:0 0 24px; }
-  .pts { list-style:none; margin:0 0 26px; padding:0; display:grid; gap:16px; max-width:34em; }
-  .pts li { display:flex; gap:14px; align-items:flex-start; font-size:1.05em; line-height:1.45; color:#e4ecfb; }
-  .pts i { flex:none; width:26px; height:26px; border-radius:50%; background:#2fd4c4; display:grid; place-items:center; margin-top:1px; }
-  .pts i::after { content:""; width:6px; height:11px; border:solid #04202a; border-width:0 2.5px 2.5px 0; rotate:45deg; translate:0 -1px; }
+  /* the modules: one card each, with a live light */
+  .pts { list-style:none; margin:0 0 26px; padding:0; display:grid; gap:10px; max-width:34em; }
+  .pts li { display:flex; gap:14px; align-items:center; padding:13px 16px; border-radius:14px; background:rgba(6,14,30,.55); border:1px solid rgba(255,255,255,.09);
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); transition:border-color .2s, background .2s; }
+  .pts li:hover { border-color:rgba(61,220,132,.35); background:rgba(6,14,30,.7); }
+  .pts i { flex:none; width:10px; height:10px; border-radius:50%; background:#3ddc84; box-shadow:0 0 0 4px rgba(61,220,132,.18), 0 0 12px rgba(61,220,132,.6); }
+  .pts span { flex:1; min-width:0; color:#a9b8d3; font-size:.86em; line-height:1.35; }
+  .pts b { display:block; color:#f4f7ff; font-size:1.08em; font-weight:700; letter-spacing:-.01em; margin-bottom:2px; }
+  .pts em { flex:none; font-style:normal; font:500 .8em/1 ui-monospace,"SF Mono",Consolas,monospace; color:#b9c6dc; }
   .cta { display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-top:auto; padding-top:8px; }
   .cta a { background:#2fd4c4; color:#04202a; text-decoration:none; font-weight:800; padding:13px 26px; border-radius:99px; box-shadow:0 14px 30px -12px rgba(47,212,196,.7); }
   .cta b { color:#2fd4c4; font-size:1.25em; font-weight:800; }
@@ -99,10 +104,7 @@
     .show-side h2 .w { animation:word .7s cubic-bezier(.2,.8,.2,1) both; animation-delay:calc(.15s + var(--i) * .07s); }
     .rule { transform-origin:left; animation:grow .8s .7s cubic-bezier(.2,.8,.2,1) both; }
     .pts li { animation:rise .6s cubic-bezier(.2,.8,.2,1) both; } .pts li:nth-child(1) { animation-delay:.9s; } .pts li:nth-child(2) { animation-delay:1.05s; } .pts li:nth-child(3) { animation-delay:1.2s; } .pts li:nth-child(4) { animation-delay:1.35s; }
-    .pts li:nth-child(1) i::after { animation:tick .35s ease-out both 1.05s; }
-    .pts li:nth-child(2) i::after { animation:tick .35s ease-out both 1.2s; }
-    .pts li:nth-child(3) i::after { animation:tick .35s ease-out both 1.35s; }
-    .pts li:nth-child(4) i::after { animation:tick .35s ease-out both 1.5s; }
+    .pts i { animation:live 2.4s ease-in-out infinite; } .pts li:nth-child(2) i { animation-delay:.6s; } .pts li:nth-child(3) i { animation-delay:1.2s; } .pts li:nth-child(4) i { animation-delay:1.8s; }
     .cta { animation-delay:1.5s; } .show-side > small { animation-delay:1.6s; }
     .deck { animation:deckin 1.1s .5s cubic-bezier(.2,.8,.2,1) both; }
   }
@@ -111,7 +113,7 @@
   @keyframes word { from { opacity:0; transform:translateY(.5em) rotate(2deg); filter:blur(6px); } }
   @keyframes deckin { from { opacity:0; translate:60px -50%; } }
   @keyframes grow { from { transform:scaleX(0); } }
-  @keyframes tick { from { scale:0; } }
+  @keyframes live { 50% { box-shadow:0 0 0 7px rgba(61,220,132,0), 0 0 16px rgba(61,220,132,.8); } }
   @keyframes bob { 50% { transform:translateY(-4px); } }
   @keyframes shake { 20% { translate:-6px 0; } 40% { translate:5px 0; } 60% { translate:-3px 0; } 80% { translate:2px 0; } }
   @keyframes ping { 0% { box-shadow:0 0 0 0 rgba(4,32,42,.55); } 70%,100% { box-shadow:0 0 0 9px rgba(4,32,42,0); } }
@@ -147,11 +149,11 @@
     <span class="tag">CLOUDTRIO NEWSROOM</span>
     <h2>Cloud, DevOps, security and AI. One team.</h2>
     <div class="rule"></div>
-    <ul class="pts">
-      <li><i></i>An AI team scans the news, writes the posts and designs the cards</li>
-      <li><i></i>You review every post before it goes out</li>
-      <li><i></i>Instagram and LinkedIn, planned in one calendar</li>
-      <li><i></i>Agents learn from your decisions and get better each week</li>
+    <ul class="pts" aria-label="Newsroom modules">
+      <li><i></i><span><b>AI newsroom</b>Scans the news, writes the posts and designs the cards</span><em>Live</em></li>
+      <li><i></i><span><b>Approvals</b>Every post reviewed here or on Telegram before it goes out</span><em>Live</em></li>
+      <li><i></i><span><b>Flyers and Reels</b>Marketing flyers with animated text and music</span><em>Live</em></li>
+      <li><i></i><span><b>Calendar and analytics</b>Instagram and LinkedIn, followers and the best times to post</span><em>Live</em></li>
     </ul>
     <div class="deck" id="deck" aria-hidden="true">
       <img src="/static/showcase/cloud.jpg" alt="" width="560" height="700"><img src="/static/showcase/news.jpg" alt="" width="560" height="700"><img src="/static/showcase/security.jpg" alt="" width="560" height="700"><img src="/static/showcase/devops.jpg" alt="" width="560" height="700"><img src="/static/showcase/ai.jpg" alt="" width="560" height="700">

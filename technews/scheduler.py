@@ -47,6 +47,8 @@ def start() -> BackgroundScheduler:
     _scheduler.add_job(pipeline.publish_due, "interval", minutes=1, id="scheduled_posts", max_instances=1, coalesce=True, misfire_grace_time=120)
     _scheduler.add_job(heartbeat, "interval", seconds=20, id="heartbeat", max_instances=1, coalesce=True)
     _scheduler.add_job(watchdog.check, "interval", minutes=10, id="watchdog", max_instances=1, coalesce=True, misfire_grace_time=600)
+    _scheduler.add_job(watchdog.health, "interval", minutes=30, id="health", max_instances=1, coalesce=True, misfire_grace_time=900,
+                       next_run_time=datetime.now(_scheduler.timezone) + timedelta(minutes=6))  # fmt: skip
     _scheduler.start()
     logger.info("scheduler.started every=%dmin", settings.SCAN_INTERVAL_MINUTES)
     return _scheduler

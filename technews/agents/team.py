@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 ROSTER: Final[dict[str, dict[str, Any]]] = {
     "scanner": {"name": "Scanner", "role": "Reads the feeds and picks the stories worth a look.", "switch": False, "learns": False},
-    "reviewer": {"name": "Reviewer", "role": "Scores each story, checks it against more than one source, and checks every draft.", "switch": False, "learns": False},
+    "reviewer": {"name": "Reviewer", "role": "Scores each story, checks it against more than one source, and checks every draft. Learns from what you approve, reject and mark as missed.", "switch": False, "learns": False},
     "writer": {"name": "Content writer", "role": "Writes the headline, key points and caption in your page's voice.", "switch": True, "learns": True},
     "creator": {"name": "Idea creator", "role": "Turns your idea or a link into three flyer options for your business, using only what you give it.", "switch": True, "learns": True},
     "designer": {"name": "Designer", "role": "Chooses the layout for each news card and checks it reads well.", "switch": True, "learns": True},
@@ -203,6 +203,19 @@ def feedback_counts() -> dict[str, int]:
 def examples(kind: str, key: str = "headline", limit: int = 6) -> list[str]:
     """Recent headlines (or another detail) behind one kind of decision."""
     return [str(r["detail"].get(key)) for r in recent_feedback(120) if r["kind"] == kind and r["detail"].get(key)][:limit]
+
+
+def reviewer_context() -> str:
+    """What the reviewer should know before choosing: the stories the editor said were missed, and what the editor
+    approved and turned down lately. This is how the reviewer learns what this page wants."""
+    parts = []
+    if (missed := examples("missed", limit=8)):
+        parts.append("Stories the editor said this page should NOT have missed (score stories like these high):\n- " + "\n- ".join(missed))
+    if (good := examples("approved", limit=8)):
+        parts.append("Posts the editor APPROVED lately (topics this page wants):\n- " + "\n- ".join(good))
+    if (bad := examples("rejected", limit=8)):
+        parts.append("Posts the editor REJECTED lately (topics to score lower):\n- " + "\n- ".join(bad))
+    return "\n\n".join(parts)
 
 
 def writer_context() -> str:

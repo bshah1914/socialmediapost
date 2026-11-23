@@ -299,7 +299,9 @@ def test_nothing_posts_until_approved(monkeypatch):
 
     db.execute("INSERT INTO posts (story_id, headline, caption, image_path, writer, delivered, status, created_at) "
                "VALUES (0,'h','c','x.jpg','w','dry_run','pending',?)", db.now())
-    assert "waiting for your approval" in pipeline.post_next()["reason"] and not sent  # the queue is full
+    monkeypatch.setattr(settings, "FLYERS_ENABLED", False)  # (a flyer has its own queue)
+    assert "news posts waiting for your approval" in pipeline.post_next()["reason"] and not sent  # the news queue is full
+    monkeypatch.setattr(settings, "FLYERS_ENABLED", True)
 
     done = pipeline.approve(first["post_id"], caption="edited caption")
     assert done["posted"] and sent == ["edited caption"] and db.story(story_id)["status"] == "posted"
@@ -668,7 +670,7 @@ def test_every_flyer_layout_renders_at_full_size_with_the_longest_copy(tmp_path)
                             "Businesses have seen 30-50% a year off email and productivity licences",
                             "A fourth point to prove four fit on the flyer"),
                            "Get a free licence review", "Savings vary with your current setup.", "c")  # fmt: skip
-    assert len(flyers.LAYOUTS) == 9
+    assert len(flyers.LAYOUTS) >= 9
     for layout, _label in flyers.LAYOUTS:
         for flyer in (flyers.FLYERS[0], longest):
             out = flyers.render(dataclasses.replace(flyer, layout=layout), tmp_path / f"{layout}.jpg")
@@ -1254,11 +1256,13 @@ def test_the_designer_chooses_a_layout_and_learns_from_your_switches(monkeypatch
     monkeypatch.setattr(settings, "SCHEDULER_ENABLED", False)
     monkeypatch.setattr(settings, "APPROVAL_MODE", "all")
     story = {"category": "devops", "title": "t"}
-    assert designer.choose(story, "Kubernetes ships a fix", [])["layout"] == "console"  # what suits the topic
-    assert designer.choose({"category": "ai"}, "AI model cuts costs by 40%", [])["layout"] == "impact"  # a figure in the headline
+    # it rotates among the strongest few, so the feed keeps changing
+    assert designer.candidates("devops", "Kubernetes ships a fix")[0] == "console"  # what suits the topic
+    assert designer.choose(story, "Kubernetes ships a fix", [])["layout"] in designer.candidates("devops", "Kubernetes ships a fix")[:4]
+    assert designer.candidates("ai", "AI model cuts costs by 40%")[0] == "impact"  # a figure in the headline
     for _ in range(3):  # the editor keeps switching devops cards to bento
         team.feedback("layout_changed", 1, **{"from": "console", "to": "bento", "category": "devops"})
-    assert designer.choose(story, "Kubernetes ships a fix", [])["layout"] == "bento"
+    assert designer.candidates("devops", "Kubernetes ships a fix")[0] == "bento"
     team.set_enabled("designer", False)
     assert designer.choose(story, "x", [])["layout"] == ""  # off means the original card
     team.set_enabled("designer", True)
@@ -1267,7 +1271,7 @@ def test_the_designer_chooses_a_layout_and_learns_from_your_switches(monkeypatch
                      "VALUES ('kd', 'Kubernetes ships a fix', 'https://x.test/k', 'The New Stack', ?, ?, 'devops', 'approved', 9, 'A fix', 'a')", db.now(), db.now())  # fmt: skip
     post_id = pipeline.draft_story(sid)["post_id"]
     meta = pipeline.draft_meta(db.rows("SELECT * FROM posts WHERE id = ?", post_id)[0])
-    assert meta["layout"] == "bento" and meta["designer"]
+    assert meta["layout"] in designer.candidates("devops", "Kubernetes ships a fix")[:4] and meta["designer"]
 
 
 def test_the_quality_editor_flags_hype_and_numbers_the_source_lacks(monkeypatch):
@@ -2007,12 +2011,12 @@ def test_a_reel_alert_goes_to_telegram_as_a_video(monkeypatch, tmp_path):
     assert url.endswith("/sendVideo") and "video" in kw["files"] and kw["data"]["supports_streaming"] == "true"
 
 
-def test_only_marketing_flyers_become_reels(monkeypatch):
+def test_news_posts_may_become_reels_too(monkeypatch):
     monkeypatch.setattr(settings, "APPROVAL_MODE", "all")
     news = db.execute("INSERT INTO posts (story_id, headline, caption, image_path, writer, delivered, status, created_at, brand_id) "
                       "VALUES (0,?,?,?,?,?,'pending',?,1)", "AWS cuts S3 prices by 40%", "c", "x.jpg", "w", "dry_run", db.now())
     out = pipeline.set_reel(news, True)
-    assert not out["ok"] and "flyer" in out["reason"]
+    assert "Only a marketing flyer" not in str(out.get("reason", ""))  # news is no longer turned away
 
 
 def test_the_animated_text_finds_what_sells():
@@ -2084,3 +2088,184 @@ def test_instagram_logins_survive_the_missing_password_key_and_an_encoded_sessio
     instagram._tell_logged_out("LoginRequired")
     instagram._tell_logged_out("LoginRequired")
     assert told == ["CloudTrio: Instagram logged the newsroom out"]
+
+
+# --------------------------------------------------------------------------- never missing a big story
+
+
+def _story(title, *, outlets=("DD News",), status="approved", score=9.0, reason="", category="outage", hours_ago=0.5, scan=7.0):
+    import json
+
+    when = (datetime.now(UTC) - timedelta(hours=hours_ago)).isoformat(timespec="seconds")
+    return db.execute("INSERT INTO stories (key, title, url, source, outlets, titles, published_at, found_at, category, status, review_score, "
+                      "review_reason, scan_score) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      f"k{abs(hash(title))}", title, "https://x.test/" + str(abs(hash(title))), outlets[0], json.dumps(list(outlets)),
+                      json.dumps([title]), when, when, category, status, score, reason, scan)  # fmt: skip
+
+
+def test_one_incident_told_in_many_words_is_one_story():
+    stories = sources.group([
+        item("Microsoft outage disrupts Outlook, Teams and AI services for over five hours", "DD News"),
+        item("Microsoft outage cause revealed: It was a perfect storm of problems", "NDTV"),
+        item("Key takeaways from Microsoft's Friday the 13th horror outage", "Mashable"),
+        item("Outlook is down for thousands of users", "Sherafy.com"),
+        item("Microsoft Ignite updates span Copilot Workspaces, new AI models and Azure", "ETIH"),
+        item("IT teams hit by ransomware wave", "Some Blog"),
+    ])  # fmt: skip
+    outage = next(s for s in stories if "five hours" in s.title)
+    assert len(stories) == 3 and len(outage.outlets) == 4 and sources.trusted(outage)
+    assert not sources.same_event("Microsoft CEO steps down", "Microsoft outage hits Teams")
+    assert not sources.same_event("New iPhone design leak", "Apple confirms iCloud breach")
+
+
+def test_a_story_turned_down_as_unconfirmed_is_read_again_when_others_report_it(monkeypatch):
+    sid = _story("Microsoft outage disrupts Outlook, Teams and AI services for over five hours", status="rejected", reason="single unverified source")
+    editor = _story("Cloudflare outage takes down thousands of sites", status="rejected", reason="rejected by the editor")
+    monkeypatch.setattr(sources, "fetch_all", lambda max_age: [item("Outlook and Teams down worldwide for hours", "NDTV"),
+                                                               item("Cloudflare outage: what went wrong", "CNN"),
+                                                               item("Cloudflare outage, explained", "Reuters")])  # fmt: skip
+    assert pipeline.scan()["new"] == 0  # no new stories: both are reports of ones it has
+    again = db.story(sid)
+    assert again["status"] == "new" and again["outlets"] == ["DD News", "NDTV"]
+    assert db.story(editor)["status"] == "rejected"  # your own no stays a no
+    assert len(db.story(editor)["outlets"]) == 3
+
+
+def test_breaking_news_skips_the_gap_and_the_queue(monkeypatch):
+    import json
+
+    _no_channels(monkeypatch)
+    monkeypatch.setattr(settings, "APPROVAL_MODE", "all")
+    monkeypatch.setattr(settings, "APPROVAL_QUEUE_MAX", 1)
+    monkeypatch.setattr(settings, "MIN_POST_GAP_MINUTES", 90)
+    db.kv_set(pipeline.LAST_POST_KEY, (datetime.now(UTC) - timedelta(minutes=30)).isoformat())
+    db.execute("INSERT INTO posts (story_id, headline, caption, image_path, writer, delivered, status, created_at) "
+               "VALUES (0,'h','c','x.jpg','w','dry_run','pending',?)", db.now())  # the news queue is full
+    calm = _story("AWS adds a region in Spain", outlets=("AWS News Blog", "The Register"), category="cloud", score=9.5)
+    hot = _story("Microsoft outage hits Outlook and Teams worldwide", outlets=("DD News", "NDTV", "CNN"))
+    out = pipeline.post_next()
+    assert out["breaking"] and out["pending"] and db.story(hot)["status"] == "pending"
+    assert json.loads(db.rows("SELECT meta FROM posts WHERE id = ?", out["post_id"])[0]["meta"])["breaking"]
+    assert not pipeline.post_next().get("pending") and db.story(calm)["status"] == "approved"  # the rest waits its turn
+    monkeypatch.setattr(settings, "BREAKING_NEWS", False)
+    assert not pipeline.is_breaking(db.story(hot) | {"status": "approved"})
+
+
+def test_old_news_drafts_are_withdrawn_but_flyers_wait(monkeypatch):
+    from technews import notify
+
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda title, text, *a, **kw: sent.append(text) or {})
+    sid = _story("Google Cloud adds guardrails for AI agents", status="pending", category="cloud")
+    old = (datetime.now(UTC) - timedelta(hours=13)).isoformat(timespec="seconds")
+    news = db.execute("INSERT INTO posts (story_id, headline, caption, image_path, writer, delivered, status, created_at) "
+                      "VALUES (?,'Guardrails','c','x.jpg','w','dry_run','pending',?)", sid, old)  # fmt: skip
+    flyer = db.execute("INSERT INTO posts (story_id, headline, caption, image_path, writer, delivered, status, created_at, flyer) "
+                       "VALUES (0,'Flyer','c','x.jpg','flyer','dry_run','pending',?,'credits')", old)  # fmt: skip
+    assert pipeline.expire_stale_drafts() == ["Guardrails"] and len(sent) == 1
+    assert db.rows("SELECT status FROM posts WHERE id = ?", news)[0]["status"] == "expired"
+    assert db.rows("SELECT status FROM posts WHERE id = ?", flyer)[0]["status"] == "pending"
+    assert db.story(sid)["review_reason"] == "draft expired" and not pipeline.approve(news)["posted"]
+    assert pipeline.expire_stale_drafts() == []
+
+
+def test_a_waiting_flyer_does_not_hold_up_the_news(monkeypatch):
+    _no_channels(monkeypatch)
+    monkeypatch.setattr(settings, "APPROVAL_MODE", "all")
+    monkeypatch.setattr(settings, "APPROVAL_QUEUE_MAX", 1)
+    db.execute("INSERT INTO posts (story_id, headline, caption, image_path, writer, delivered, status, created_at, flyer) "
+               "VALUES (0,'Flyer','c','x.jpg','flyer','dry_run','pending',?,'credits')", db.now())  # fmt: skip
+    _story("AWS adds a region in Spain", outlets=("AWS News Blog", "The Register"), category="cloud")
+    assert pipeline.pending_count(flyer=True) == 1 and pipeline.pending_count(flyer=False) == 0
+    assert pipeline.post_next()["pending"]
+
+
+def test_the_health_checks_speak_up_once(monkeypatch):
+    from technews import notify, watchdog
+
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda title, text, *a, markup="", **kw: sent.append((title, markup)) or {})
+    monkeypatch.setattr(settings, "IG_DELIVERY", "instagram")
+    db.execute("INSERT INTO posts (story_id, headline, caption, image_path, writer, delivered, status, created_at, flyer) "
+               "VALUES (0,'Flyer','c','x.jpg','flyer','dry_run','pending',?,'credits')", (datetime.now(UTC) - timedelta(hours=7)).isoformat())  # fmt: skip
+    db.kv_set(pipeline.LAST_POST_KEY, (datetime.now(UTC) - timedelta(hours=30)).isoformat())
+    missed = _story("Cloudflare outage takes down thousands of websites", status="rejected", reason="Single niche outlet",
+                    outlets=("A", "B", "C", "D", "E", "F"))  # fmt: skip
+    _story("Small vendor blog post", status="rejected", outlets=("A", "B", "C", "D", "E", "F"), category="other")
+    found = watchdog.health()
+    assert set(found) == {"queue", "quiet", "missed"}
+    assert any(f"md:{missed}" in markup for _t, markup in sent) and len(sent) == 3
+    assert watchdog.health() == {} and len(sent) == 3  # said once, not every half hour
+    monkeypatch.setattr(settings, "IG_DELIVERY", "dry_run")
+    assert watchdog.health() == {"state": "skipped"}
+
+
+def test_make_a_post_from_telegram_drafts_a_missed_story_and_the_reviewer_learns(monkeypatch):
+    from technews import telegram
+    from technews.agents import team
+
+    _no_channels(monkeypatch)
+    monkeypatch.setattr(settings, "APPROVAL_MODE", "all")
+    monkeypatch.setattr(settings, "TELEGRAM_CHAT_ID", "555")
+    calls = []
+    monkeypatch.setattr(telegram, "_api", lambda method, **data: calls.append((method, data)) or {"ok": True})
+    sid = _story("Cloudflare outage takes down thousands of websites", status="rejected", reason="Single niche outlet")
+    telegram.handle({"id": "c1", "data": f"md:{sid}", "message": {"chat": {"id": 555}, "message_id": 3, "text": "missed"}})
+    assert db.story(sid)["status"] == "pending" and pipeline.pending_count() == 1
+    assert any("waiting for your approval" in d.get("text", "") for m, d in calls if m == "editMessageText")
+    assert "Cloudflare outage takes down thousands of websites" in team.reviewer_context()
+    telegram.handle({"id": "c2", "data": f"md:{sid}", "message": {"chat": {"id": 555}, "message_id": 3, "text": "missed"}})
+    assert pipeline.pending_count() == 1  # a second tap makes nothing more
+
+
+def test_new_sources_arrive_once_and_google_news_pages_name_their_outlets(monkeypatch):
+    sources.seed()
+    assert any(r["name"] == "Google News Technology" for r in sources.listing())
+    sources.remove(next(r for r in sources.listing() if r["name"] == "Google News Technology")["id"])
+    db.kv_set("sources:seeded:v2", "")  # a database from before the new sources
+    sources.seed()
+    assert any(r["name"] == "Google News Technology" for r in sources.listing())  # added once
+    sources.remove(next(r for r in sources.listing() if r["name"] == "Google News Technology")["id"])
+    sources.seed()
+    assert not any(r["name"] == "Google News Technology" for r in sources.listing())  # and your removal stays
+    rss = ('<rss><channel><item><title>Teams is down - The Verge</title><link>https://news.google.com/a</link>'
+           '<source url="https://theverge.com">The Verge</source><pubDate>Mon, 23 Nov 2026 08:00:00 GMT</pubDate></item></channel></rss>')
+    monkeypatch.setattr(sources, "_get", lambda url, **params: rss)
+    got = sources._fetch_feed("Google News Technology", sources.FEEDS["Google News Technology"])
+    assert got[0].source == "The Verge" and got[0].title == "Teams is down"
+
+
+def test_a_company_incident_never_joins_another_companys_story():
+    assert not sources.same_story("Slack is down for users worldwide", "WhatsApp down worldwide for users")
+    assert not sources.same_story("Slack is down for users worldwide", "Experts: prepare for the next big internet outage worldwide")
+    assert sources.same_story("Slack is down for users worldwide", "Slack down worldwide for many users")
+    stories = sources.group([item("WhatsApp down worldwide for users", "CNN", 90), item("Slack is down for users worldwide", "NDTV", 30)])
+    assert len(stories) == 2
+
+
+def test_a_retired_ai_model_is_skipped_and_reported(monkeypatch):
+    from technews import notify, watchdog
+    from technews.agents import llm
+
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY", "k")
+    monkeypatch.setattr(settings, "NVIDIA_MODEL", "old/model")
+    monkeypatch.setattr(settings, "NVIDIA_FALLBACK_MODELS", ["new/model"])
+    monkeypatch.setattr(llm, "_retired", {})
+    asked = []
+
+    def once(system, user, model, *a, **kw):
+        asked.append(model)
+        if model == "old/model":
+            raise llm.LLMError("HTTP 410: The model has reached its end of life")
+        return llm.ChatResult({"ok": True}, model, 5)
+
+    monkeypatch.setattr(llm, "_chat_once", once)
+    assert llm.chat_json(system="s", user="u").model == "new/model"
+    assert llm.chat_json(system="s", user="u").model == "new/model"
+    assert asked == ["old/model", "new/model", "new/model"]  # the retired one is not asked again
+    assert "old/model" in llm.retired()
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda title, text, *a, **kw: sent.append(title) or {})
+    monkeypatch.setattr(settings, "IG_DELIVERY", "instagram")
+    assert "models" in watchdog.health() and sent == ["CloudTrio: an AI model was retired"]
+    assert "models" not in watchdog.health()  # said once

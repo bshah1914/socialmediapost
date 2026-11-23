@@ -67,10 +67,16 @@ def handle(cb: dict[str, Any]) -> None:
         _answer(cb, "This chat is not allowed to approve posts.", alert=True)
         return
     action, _, raw = str(cb.get("data") or "").partition(":")
-    if not raw.isdigit() or action not in ("ap", "rj", "ok", "no"):
+    if not raw.isdigit() or action not in ("ap", "rj", "ok", "no", "md"):
         _answer(cb, "That button is not recognised.")
         return
     post_id = int(raw)
+    if action == "md":  # a "possibly missed" story: make it into a draft (it arrives as its own message)
+        _answer(cb, "Making the post...")
+        out = pipeline.draft_missed(post_id)
+        _edit(msg, "\U0001f4dd Made into a post: it is waiting for your approval" if out.get("pending") else
+              "✅ Posted" if out.get("posted") else f"Nothing done: {out.get('reason', '')}")  # fmt: skip
+        return
     if action == "ap":  # publishing is immediate, so ask once more
         _answer(cb, "Tap Yes to post it now.")
         _edit(msg, markup=_markup([[{"text": "✅ Yes, post it now", "callback_data": f"ok:{post_id}"},

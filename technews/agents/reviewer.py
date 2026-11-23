@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from technews import sources
-from technews.agents import llm
+from technews.agents import llm, team
 from technews.agents.scanner import PRIORITY
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,10 @@ SYSTEM: Final = (
     "story, post at most one. CLOUD, DEVOPS AND AI NEWS ARE THE FIRST PRIORITY: a candidate with category cloud, ai "
     "or devops wins ties and is posted before anything else; for these, a major provider's (AWS, "
     "Azure, GCP) or tool's own announcement, release, earnings, outage or big deal is real news, "
-    "not a press release. angle: one line on why it matters to an ordinary tech user (what "
+    "not a press release. AN OUTAGE, BREACH OR EXPLOITED ZERO-DAY AT A MAJOR SERVICE (Microsoft 365 / Azure / Outlook / "
+    "Teams, AWS, Google, Cloudflare, GitHub, OpenAI, Meta, Apple, CrowdStrike and the like) that hits many users is ALWAYS "
+    "a top story: score it 9 or 10 and post it, also when the headline is about its cause or its impact. "
+    "angle: one line on why it matters to an ordinary tech user (what "
     "it means for them, or what to do). reason: at most 15 words.\n"
     'Reply with ONE JSON object: {"reviews": [{"id": 12, "verdict": "post", "score": 9, '
     '"angle": "...", "reason": "..."}]} with one entry per candidate.'
@@ -79,7 +82,9 @@ def select(candidates: list[dict[str, Any]], *, min_score: float) -> list[Review
     reviews: dict[int, Review] = {}
     if llm.available():
         try:
-            reply = llm.chat_json(system=SYSTEM, user=_prompt(candidates), max_tokens=3000, temperature=0.1)
+            learned = team.reviewer_context()
+            reply = llm.chat_json(system=SYSTEM, user=_prompt(candidates) + (f"\n\nWHAT THE EDITOR TAUGHT YOU:\n{learned}" if learned else ""),
+                                  max_tokens=3000, temperature=0.1)  # fmt: skip
             for row in reply.data.get("reviews") or []:
                 try:
                     sid = int(row["id"])
