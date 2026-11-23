@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ship the newsroom to the server.
+# Ship socialmediapost to the server (see docs/switch-over.md before the first live promote).
 #
 #   deploy/deploy.sh staging    build, send to the staging site and check it
 #   deploy/deploy.sh promote    make the image that is on staging the live one (no rebuild)
@@ -10,11 +10,11 @@
 set -euo pipefail
 
 HOST="${DEPLOY_HOST:-brijesh@192.168.50.183}"
-IMAGE="cloudtrio/newsroom"
-LIVE_DIR="cloudtrio-newsroom"
-STAGE_DIR="cloudtrio-newsroom-staging"
+IMAGE="socialmediapost"
+LIVE_DIR="socialmediapost"
+STAGE_DIR="socialmediapost-staging"
 LIVE_PORT=7086
-STAGE_PORT=7087
+STAGE_PORT=7088  # 7087 is the old technews staging, which may still run during the trial
 cd "$(dirname "$0")/.."
 
 remote() { ssh "$HOST" "$@"; }
@@ -36,13 +36,13 @@ case "${1:-}" in
     docker build -q -t "$IMAGE:staging" . >/dev/null
     echo "Sending to staging..."
     docker save "$IMAGE:staging" | remote "docker load >/dev/null && cd ~/$STAGE_DIR && docker compose up -d --force-recreate 2>&1 | tail -1"
-    wait_healthy cloudtrio-newsroom-staging "192.168.50.183:$STAGE_PORT"
+    wait_healthy socialmediapost-staging "192.168.50.183:$STAGE_PORT"
     echo "Staging: http://192.168.50.183:$STAGE_PORT  (sign in as admin; the password is in ~/$STAGE_DIR/.env on the server)"
     ;;
   promote)
     echo "Promoting the staged image to live..."
     remote "docker image inspect $IMAGE:staging >/dev/null && docker tag $IMAGE:latest $IMAGE:previous && docker tag $IMAGE:staging $IMAGE:latest && cd ~/$LIVE_DIR && docker compose up -d --force-recreate 2>&1 | tail -1"
-    if ! wait_healthy cloudtrio-newsroom "localhost:$LIVE_PORT"; then
+    if ! wait_healthy socialmediapost "localhost:$LIVE_PORT"; then
       echo "The new version is not healthy: rolling back" >&2
       exec "$0" rollback
     fi
@@ -51,10 +51,10 @@ case "${1:-}" in
   rollback)
     echo "Rolling back to the previous image..."
     remote "docker image inspect $IMAGE:previous >/dev/null && docker tag $IMAGE:previous $IMAGE:latest && cd ~/$LIVE_DIR && docker compose up -d --force-recreate 2>&1 | tail -1"
-    wait_healthy cloudtrio-newsroom "localhost:$LIVE_PORT"
+    wait_healthy socialmediapost "localhost:$LIVE_PORT"
     ;;
   status)
-    remote "docker ps --filter name=cloudtrio-newsroom --format '{{.Names}}  {{.Status}}  {{.Image}}'; docker images $IMAGE --format '{{.Tag}}  {{.ID}}  {{.CreatedSince}}'"
+    remote "docker ps --filter name=socialmediapost --format '{{.Names}}  {{.Status}}  {{.Image}}'; docker images $IMAGE --format '{{.Tag}}  {{.ID}}  {{.CreatedSince}}'"
     ;;
   *)
     sed -n '2,10p' "$0"

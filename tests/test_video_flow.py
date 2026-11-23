@@ -139,3 +139,11 @@ def test_video_caption_with_ai_drops_its_hashtags(monkeypatch):
         text = writer.video_caption("Our sourdough comes out at 6am", "")
     assert "#yum" not in text and text.startswith("Warm bread at 6am.") and text.rstrip().endswith("#bread")
     assert "Family bakery in Pune since 1998" in seen[0] and "Our sourdough comes out at 6am" in seen[0]
+
+
+def test_upload_section_only_for_businesses_with_videos():
+    bid = make_brand("Bakery", kinds="flyers")
+    owner = client_as("baker", "Pass@1234", "owner", bid).get("/").get_data(as_text=True)
+    assert 'href="#videos"' not in owner
+    admin = client_as("boss", "Admin@1234").get("/").get_data(as_text=True)
+    assert 'href="#videos"' in admin and 'id="vd-file"' in admin

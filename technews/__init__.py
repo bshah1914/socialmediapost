@@ -516,6 +516,8 @@ def create_app() -> Flask:
         pending_reel  = [p for p in pending if     (pending_meta.get(p["id"]) or {}).get("reel", {}).get("video")]
         posts_meta = {p["id"]: pipeline.draft_meta(p) for p in posts}
         hidden = set() if news_on else {"stories"}
+        if not (brands.has("videos", g.brand) and motion.available()):
+            hidden.add("videos")
         if g.role != "admin":  # a business's own people never see the admin pages nor the other businesses
             hidden |= {"sources", "settings"}
         shown = [b for b in brands.listing() if b["enabled"] and (g.role == "admin" or b["id"] == g.brand["id"])]

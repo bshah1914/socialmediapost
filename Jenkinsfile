@@ -1,4 +1,4 @@
-// CloudTrio Newsroom — build & deploy pipeline.
+// socialmediapost — build & deploy pipeline.
 //
 // Assumes the Jenkins agent runs on (or shares a Docker daemon with) the host
 // that runs the app, and that ${DEPLOY_DIR} holds the real docker-compose.yml
@@ -14,9 +14,9 @@ pipeline {
   agent any
 
   parameters {
-    string(name: 'DEPLOY_DIR', defaultValue: '/home/brijesh/cloudtrio-newsroom',
+    string(name: 'DEPLOY_DIR', defaultValue: '/home/brijesh/socialmediapost',
            description: 'Dir on the deploy host holding docker-compose.yml + .env')
-    string(name: 'IMAGE',      defaultValue: 'cloudtrio/newsroom', description: 'Docker image name')
+    string(name: 'IMAGE',      defaultValue: 'socialmediapost', description: 'Docker image name')
     string(name: 'LIVE_PORT',  defaultValue: '7086', description: 'Host port the live app listens on')
   }
 

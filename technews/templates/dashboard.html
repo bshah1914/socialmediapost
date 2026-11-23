@@ -196,6 +196,13 @@
   .ob-steps li[aria-current="step"] { background:var(--brand); color:var(--brand-ink); border-color:var(--brand); }
   .ob-steps li.done { color:var(--text); }
   .ob-pane fieldset, .cr-as { border:0; padding:0; margin:8px 0 0; } .ob-pane legend, .cr-as legend { font-weight:600; margin-bottom:4px; }
+  #vd-player { width:100%; max-height:60vh; background:#000; border-radius:12px; margin-top:10px; }
+  #vd-prog { width:100%; margin-top:8px; }
+  .vd-h { margin:14px 0 6px; font-size:1em; }
+  .vd-covers { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px; }
+  .vd-covers button { padding:0; border:2px solid var(--line); border-radius:10px; overflow:hidden; background:var(--surface-2); cursor:pointer; }
+  .vd-covers button[aria-pressed="true"] { border-color:var(--brand); box-shadow:0 0 0 2px var(--brand); }
+  .vd-covers img { display:block; width:100%; aspect-ratio:9/16; object-fit:cover; }
   .table { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); }
   table { width:100%; border-collapse:collapse; min-width:820px; }
   caption { text-align:left; padding:12px 14px; color:var(--muted); font-size:.86em; }
@@ -604,6 +611,7 @@
   'flyers': '<path d="M5 3h14v18H5zM8 7h8M8 11h8M8 15h5"/>',
   'sources': '<path d="M5 5a14 14 0 0114 14M5 11a8 8 0 018 8"/><circle cx="6" cy="18" r="1.5"/>',
   'settings': '<path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8 4l2-1-2-4-2 .5a7 7 0 00-2-1L15 4H9l-1 2.5a7 7 0 00-2 1L4 7l-2 4 2 1a7 7 0 000 2l-2 1 2 4 2-.5a7 7 0 002 1L9 22h6l1-2.5a7 7 0 002-1l2 .5 2-4-2-1a7 7 0 000-2z"/>',
+  'videos': '<path d="M4 7h11v10H4zM15 10.5l5-3v9l-5-3"/>',
   'reels': '<path d="M15 10l-4-2.5v5l4-2.5z"/><rect x="2" y="6" width="20" height="12" rx="3"/>'
 } %}
 <div class="app">
@@ -615,9 +623,9 @@
     {% if brand_list|length > 1 %}<label class="sr" for="brand-sw">Brand</label>
     <select id="brand-sw" class="brand-sw" onchange="switchBrand(this.value)">{% for b in brand_list %}<option value="{{ b.id }}" {{ 'selected' if b.id == brand_now }}>{{ b.name }}</option>{% endfor %}</select>{% endif %}
     <nav aria-label="Dashboard sections" id="nav">
-      {% for key, label in [('overview','Overview'),('approvals','Approvals'),('reels','Reels'),('posts','Posts'),('analytics','Analytics'),('stories','Stories'),('create','Create'),('agents','Agents'),('calendar','Calendar'),('flyers','Flyers'),('sources','Sources'),('settings','Settings')] if key not in nav_hide %}
+      {% for key, label in [('overview','Overview'),('approvals','Approvals'),('reels','Reels'),('posts','Posts'),('analytics','Analytics'),('stories','Stories'),('create','Create'),('videos','Upload video'),('agents','Agents'),('calendar','Calendar'),('flyers','Flyers'),('sources','Sources'),('settings','Settings')] if key not in nav_hide %}
       {% if key == 'create' %}<span class="nav-label">Plan and manage</span>{% endif %}
-      <a href="#{{ key }}" data-view="{{ key }}" class="{{ 'sec' if key in ('analytics','create','agents','calendar','flyers','sources','settings') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{{ icons[key]|safe }}</svg><span class="lbl">{{ label }}</span>{% if key == 'approvals' and status.pending %}<span class="badge" aria-label="{{ status.pending }} waiting">{{ status.pending }}</span>{% endif %}{% if key == 'reels' and status.reels_pending %}<span class="badge" aria-label="{{ status.reels_pending }} reels waiting">{{ status.reels_pending }}</span>{% endif %}</a>
+      <a href="#{{ key }}" data-view="{{ key }}" class="{{ 'sec' if key in ('analytics','create','videos','agents','calendar','flyers','sources','settings') else '' }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{{ icons[key]|safe }}</svg><span class="lbl">{{ label }}</span>{% if key == 'approvals' and status.pending %}<span class="badge" aria-label="{{ status.pending }} waiting">{{ status.pending }}</span>{% endif %}{% if key == 'reels' and status.reels_pending %}<span class="badge" aria-label="{{ status.reels_pending }} reels waiting">{{ status.reels_pending }}</span>{% endif %}</a>
       {% endfor %}
       <button type="button" class="more-btn" id="more-btn" aria-expanded="false" aria-controls="more" onclick="toggleMore()"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg><span class="lbl">More</span></button>
     </nav>
@@ -634,7 +642,7 @@
 
   <div id="more" role="dialog" aria-label="More sections">
     <div class="links">
-      {% for key, label in [('analytics','Analytics'),('create','Create'),('agents','Agents'),('flyers','Flyers'),('calendar','Calendar'),('sources','Sources'),('settings','Settings')] if key not in nav_hide %}
+      {% for key, label in [('analytics','Analytics'),('create','Create'),('videos','Upload video'),('agents','Agents'),('flyers','Flyers'),('calendar','Calendar'),('sources','Sources'),('settings','Settings')] if key not in nav_hide %}
       <a href="#{{ key }}" data-view="{{ key }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">{{ icons[key]|safe }}</svg>{{ label }}</a>
       {% endfor %}
     </div>
@@ -910,6 +918,40 @@
       </div>
       <div class="cr-grid" id="cr-results"></div>
       <div class="card"><h2>Recent ideas</h2><p class="sub">What you gave the creator lately.</p><ul class="list" id="cr-history"></ul></div>
+    </section>
+
+    <!-- ============================================================ UPLOAD VIDEO -->
+    <section id="videos" data-view="videos" hidden aria-labelledby="view-title">
+      <div class="card">
+        <h2>Turn your video into a Reel</h2>
+        <p class="sub">MP4 or MOV, up to 300 MB. Trim it to 3 minutes or less. Sideways videos get a soft blurred fill so they fit the phone screen. Nothing is posted until you approve it.</p>
+        <label for="vd-file">Video file</label><input id="vd-file" type="file" accept="video/mp4,video/quicktime,.mp4,.mov">
+        <progress id="vd-prog" max="100" value="0" hidden aria-label="Upload progress"></progress>
+        <div id="vd-edit" hidden>
+          <video id="vd-player" controls playsinline preload="metadata"></video>
+          <div class="two">
+            <div><label for="vd-start">Start (seconds)</label><input id="vd-start" type="number" min="0" step="0.1" value="0" inputmode="decimal"></div>
+            <div><label for="vd-end">End (seconds)</label><input id="vd-end" type="number" min="0" step="0.1" inputmode="decimal"></div>
+          </div>
+          <div class="row"><button class="btn ghost sm" type="button" id="vd-set-start">Start here</button><button class="btn ghost sm" type="button" id="vd-set-end">End here</button><span class="muted" id="vd-len" aria-live="polite"></span></div>
+          <fieldset class="cr-as"><legend>Sound</legend>
+            <label class="check"><input type="radio" name="vd-sound" value="original" checked> Keep the video's sound</label>
+            <label class="check"><input type="radio" name="vd-sound" value="both"> The video's sound with music under it</label>
+            <label class="check"><input type="radio" name="vd-sound" value="music"> Music only</label>
+          </fieldset>
+          <div id="vd-track-row" hidden><label for="vd-track">Music</label><select id="vd-track">{% for k, l in reel_tracks if k != 'none' %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></div>
+          <label class="check"><input type="checkbox" id="vd-logo" checked> Logo in the corner</label>
+          <label class="check"><input type="checkbox" id="vd-title" checked> A title for the first seconds</label>
+          <label for="vd-title-text">Title</label><input id="vd-title-text" type="text" maxlength="80" placeholder="Our new office">
+          <label for="vd-about">About this video (the caption is written from this line only)</label>
+          <input id="vd-about" type="text" maxlength="300" placeholder="For example: our new office in Pune is open, come and say hello">
+          <h3 class="vd-h">Cover</h3>
+          <div class="vd-covers" id="vd-covers" role="group" aria-label="Choose the cover"></div>
+          <div class="row"><button class="btn" type="button" id="vd-reel">Make Reel</button><button class="btn ghost" type="button" id="vd-post">Make photo post</button></div>
+        </div>
+        <div id="vd-msg" class="msg" role="status" aria-live="polite"></div>
+      </div>
+      <div class="card"><h2>Your videos</h2><p class="sub">Uploads for this business, newest first.</p><ul class="list" id="vd-list"></ul></div>
     </section>
 
     <!-- ============================================================ AGENTS -->
@@ -1685,6 +1727,7 @@
     posts: ["Posts", "Everything published to the page, news cards and flyers. Select one for the caption."],
     analytics: ["Analytics", "What the audience does with the posts: followers, reach, saves, shares and plays, read back from Instagram."],
     stories: ["Stories", "What the scanner found, how the reviewer scored it, and what happened next."],
+    videos: ["Upload video", "Your own recorded video, made ready for Instagram: trimmed, fitted to the phone screen, with your logo, title and sound. It waits in Reels for your approval."],
     create: ["Create", "Give the Idea creator an idea or a link. It writes three flyers for your business and sends the one you pick to Approvals."],
     agents: ["Agents", "Your newsroom team: what each agent does, what it has learned from your decisions, and how it is performing."],
     calendar: ["Calendar", "What went out, what is scheduled and what is waiting, day by day. Select a post for its details."],
@@ -2793,6 +2836,83 @@
     $("cr-history").innerHTML = d.ideas.map((i) => `<li><span class="k">${esc((i.idea || i.url).slice(0, 90))}<br><span style="font-size:.85em">${esc(i.at.slice(0, 16).replace("T", " "))} UTC</span></span><span class="v">${i.status === "sent" ? "sent to Approvals" : "not sent"}</span></li>`).join("") || '<li class="muted">Nothing yet.</li>';
   }
   window.addEventListener("hashchange", () => { if (location.hash === "#create") loadCreateHistory(); });
+  /* ---- a business's own video: upload, trim, sound, logo, title, cover, then Make Reel / Make photo post */
+  const VD = { id: 0, seconds: 0, cover: null, timer: 0 };
+  const vdTimes = () => { const s = +$("vd-start").value || 0, e = +$("vd-end").value || VD.seconds; return [0, 1, 2, 3].map((i) => +(s + (e - s) * (i + 0.5) / 4).toFixed(2)); };
+  function vdLen() {
+    const s = +$("vd-start").value || 0, e = +$("vd-end").value || VD.seconds, len = Math.max(0, e - s);
+    $("vd-len").textContent = `Length ${len.toFixed(1)} s${len > 180 ? " (over 3 minutes: trim it)" : ""}`;
+    return len;
+  }
+  function vdCovers() {
+    const times = vdTimes(); if (VD.cover === null || VD.cover < times[0] || VD.cover > times[3]) VD.cover = times[1];
+    $("vd-covers").innerHTML = times.map((t) => `<button type="button" data-cover="${t}" aria-pressed="${t === VD.cover}" aria-label="Cover at ${t} seconds"><img loading="lazy" alt="" src="/api/videos/${VD.id}/frame.jpg?at=${t}"></button>`).join("");
+  }
+  function vdOpen(v) {
+    VD.id = v.id; VD.seconds = v.seconds; VD.cover = null;
+    $("vd-edit").hidden = false; $("vd-player").src = `/api/videos/${v.id}/source`;
+    $("vd-start").value = 0; $("vd-end").value = v.seconds; $("vd-end").max = v.seconds; $("vd-start").max = v.seconds;
+    vdLen(); vdCovers(); loadVideos();
+  }
+  async function loadVideos() {
+    if (!$("vd-list")) return;
+    const [ok, d] = await api("/api/videos"); if (!ok) return;
+    const label = { uploaded: "uploaded", queued: "waiting to be made", working: "being made…", done: "made: waiting for approval", failed: "failed" };
+    $("vd-list").innerHTML = d.videos.map((v) => `<li><span class="k">${esc(v.original_name || "video")}<br><span style="font-size:.85em">${esc(v.at.slice(0, 16).replace("T", " "))} UTC · ${(+v.seconds).toFixed(1)} s${v.error ? " · " + esc(v.error.slice(0, 120)) : ""}</span></span>
+      <span class="v">${label[v.status] || esc(v.status)}${v.status === "uploaded" || v.status === "failed" ? ` <button class="btn ghost sm" type="button" data-vdopen="${v.id}">Open</button>` : ""}</span></li>`).join("") || '<li class="muted">No videos yet.</li>';
+    d.videos.filter((v) => v.status === "uploaded" || v.status === "failed").forEach((v) => (VD["v" + v.id] = v));
+  }
+  if ($("vd-file")) {
+    $("vd-file").addEventListener("change", () => {
+      const f = $("vd-file").files[0]; if (!f) return;
+      if (f.size > 300 * 1024 * 1024) { say("vd-msg", "The video is over 300 MB.", false); return; }
+      const fd = new FormData(); fd.append("file", f);
+      const x = new XMLHttpRequest(); x.open("POST", "/api/videos");
+      Object.entries(tokenHeaders()).forEach(([k, v]) => x.setRequestHeader(k, v));
+      $("vd-prog").hidden = false; $("vd-prog").value = 0; say("vd-msg", "Uploading…", true);
+      x.upload.onprogress = (e) => { if (e.lengthComputable) $("vd-prog").value = Math.round((e.loaded / e.total) * 100); };
+      x.onload = () => { $("vd-prog").hidden = true; let d = {}; try { d = JSON.parse(x.responseText); } catch (err) { d = { error: "The server did not answer." }; }
+        if (x.status !== 200) { say("vd-msg", d.error || d.message || "Upload failed", false); return; }
+        say("vd-msg", "Uploaded. Trim it, pick the sound and the cover, then make it.", true); vdOpen(d.video); };
+      x.onerror = () => { $("vd-prog").hidden = true; say("vd-msg", "The upload stopped. Check the connection and try again.", false); };
+      x.send(fd);
+    });
+    ["vd-start", "vd-end"].forEach((id) => $(id).addEventListener("change", () => { vdLen(); vdCovers(); }));
+    $("vd-set-start").onclick = () => { $("vd-start").value = $("vd-player").currentTime.toFixed(1); vdLen(); vdCovers(); };
+    $("vd-set-end").onclick = () => { $("vd-end").value = $("vd-player").currentTime.toFixed(1); vdLen(); vdCovers(); };
+    document.querySelectorAll('input[name="vd-sound"]').forEach((r) => r.addEventListener("change", () => { $("vd-track-row").hidden = r.value === "original" && r.checked; }));
+    document.addEventListener("click", (e) => {
+      const c = e.target.closest("[data-cover]"); if (c) { VD.cover = +c.dataset.cover; vdCovers(); }
+      const o = e.target.closest("[data-vdopen]"); if (o && VD["v" + o.dataset.vdopen]) { vdOpen(VD["v" + o.dataset.vdopen]); window.scrollTo({ top: 0, behavior: "smooth" }); }
+    });
+    async function vdMake(asPost) {
+      if (vdLen() > 180) { say("vd-msg", "Trim the video to 3 minutes or less first.", false); return; }
+      const sound = document.querySelector('input[name="vd-sound"]:checked').value;
+      const body = { start: +$("vd-start").value || 0, end: +$("vd-end").value || 0, sound, track: sound === "original" ? "" : $("vd-track").value,
+        logo: $("vd-logo").checked, title: $("vd-title").checked, title_text: $("vd-title-text").value, about: $("vd-about").value, as_post: asPost, cover_at: VD.cover };
+      $("vd-reel").disabled = $("vd-post").disabled = true;
+      const [ok, d] = await api(`/api/videos/${VD.id}/make`, body);
+      if (!ok) { $("vd-reel").disabled = $("vd-post").disabled = false; say("vd-msg", d.error || d.message || "Failed", false); return; }
+      say("vd-msg", "Making it… this takes about as long as the video.", true); vdWatch(VD.id, asPost);
+    }
+    function vdWatch(id, asPost) {
+      clearInterval(VD.timer);
+      VD.timer = setInterval(async () => {
+        const [ok, d] = await api(`/api/videos/${id}`); if (!ok) return;
+        const v = d.video;
+        if (v.status === "done") { clearInterval(VD.timer); $("vd-reel").disabled = $("vd-post").disabled = false; $("vd-edit").hidden = true; $("vd-file").value = "";
+          say("vd-msg", asPost ? "Done. The photo post is waiting in Approvals." : "Done. The Reel is waiting in Reels.", true); loadVideos();
+          toast(asPost ? "Your photo post is waiting in Approvals." : "Your Reel is waiting in Reels.", false); }
+        else if (v.status === "failed") { clearInterval(VD.timer); $("vd-reel").disabled = $("vd-post").disabled = false; say("vd-msg", "It could not be made: " + (v.error || "unknown problem"), false); loadVideos(); }
+        else say("vd-msg", v.status === "working" ? "Making it… (" + (+v.seconds).toFixed(0) + " s of video)" : "Waiting its turn…", true);
+      }, 3000);
+    }
+    $("vd-reel").onclick = () => vdMake(false);
+    $("vd-post").onclick = () => vdMake(true);
+    window.addEventListener("hashchange", () => { if (location.hash === "#videos") loadVideos(); });
+    if (location.hash === "#videos") loadVideos();
+  }
+
   loadCreateHistory();
 
   show(); loadSettings(); filterStories(); loadSources(); srcKind();
