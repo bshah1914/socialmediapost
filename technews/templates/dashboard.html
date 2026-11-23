@@ -195,7 +195,7 @@
   .ob-steps li span { font-weight:700; }
   .ob-steps li[aria-current="step"] { background:var(--brand); color:var(--brand-ink); border-color:var(--brand); }
   .ob-steps li.done { color:var(--text); }
-  .ob-pane fieldset { border:0; padding:0; margin:8px 0 0; } .ob-pane legend { font-weight:600; margin-bottom:4px; }
+  .ob-pane fieldset, .cr-as { border:0; padding:0; margin:8px 0 0; } .ob-pane legend, .cr-as legend { font-weight:600; margin-bottom:4px; }
   .table { overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); }
   table { width:100%; border-collapse:collapse; min-width:820px; }
   caption { text-align:left; padding:12px 14px; color:var(--muted); font-size:.86em; }
@@ -896,6 +896,14 @@
             <div><label for="cr-goal">What is the post for?</label><select id="cr-goal"><option value="promote">Promote a service or offer</option><option value="announce">Announce news or an update</option><option value="educate">Teach something useful</option><option value="trust">Build trust (proof, partners, how we work)</option></select></div>
             <div><label for="cr-tone">Tone</label><select id="cr-tone"><option value="professional">Professional and clear</option><option value="friendly">Friendly and simple</option><option value="bold">Bold and punchy</option></select></div>
           </div>
+          {% if reels_ok %}<fieldset class="cr-as"><legend>Make it as</legend>
+            <label class="check"><input type="radio" name="cr-as" value="flyer" checked> Flyer (a still picture)</label>
+            <label class="check"><input type="radio" name="cr-as" value="reel"> Reel (animated, with music)</label>
+          </fieldset>
+          <div class="two" id="cr-reel-opts" hidden>
+            <div><label for="cr-style">Animation</label><select id="cr-style"><option value="">Pick one for me</option>{% for k, l in reel_styles %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></div>
+            <div><label for="cr-track">Music</label><select id="cr-track">{% for k, l in reel_tracks %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></div>
+          </div>{% endif %}
           <div class="row"><button class="btn" id="cr-go" type="submit">Create 3 options</button></div>
         </form>
         <div id="cr-msg" class="msg" role="status" aria-live="polite"></div>
@@ -2765,12 +2773,18 @@
     loadCreateHistory();
   }
   function crVariant(i) { return { ...CR.variants[i], headline: $("cr-h-" + i).value, caption: $("cr-c-" + i).value }; }
+  const crAsReel = () => !!document.querySelector('input[name="cr-as"][value="reel"]:checked');
+  document.querySelectorAll('input[name="cr-as"]').forEach((r) => r.addEventListener("change", () => { $("cr-reel-opts").hidden = !crAsReel(); }));
   document.addEventListener("click", async (e) => {
     const s = e.target.closest("[data-send]"), t = e.target.closest("[data-tune]");
     if (s) { const i = +s.dataset.send; s.disabled = true;
-      const [ok, d] = await api("/api/create/send", { idea_id: CR.id, variant: crVariant(i), rotate: $("cr-r-" + i).checked }); s.disabled = false;
+      const asReel = crAsReel();
+      if (asReel) { s.textContent = "Making the Reel… up to a minute"; }
+      const [ok, d] = await api("/api/create/send", { idea_id: CR.id, variant: crVariant(i), rotate: $("cr-r-" + i).checked,
+        as: asReel ? "reel" : "flyer", style: asReel ? $("cr-style").value : "", track: asReel ? $("cr-track").value : "" }); s.disabled = false;
       if (!ok) { toast(d.error || d.message || "Failed", true); return; }
-      toast("Sent. It is waiting in Approvals.", false); location.hash = "approvals"; setTimeout(() => location.reload(), 500); }
+      if (asReel && !d.reel) { toast("The Reel could not be made (" + (d.reason || "unknown problem") + "). The flyer is waiting in Approvals.", true); location.hash = "approvals"; setTimeout(() => location.reload(), 2500); return; }
+      toast(d.reel ? "Sent. The Reel is waiting in Reels." : "Sent. It is waiting in Approvals.", false); location.hash = d.reel ? "reels" : "approvals"; setTimeout(() => location.reload(), 500); }
     if (t) { const v = crVariant(+t.dataset.tune); editFlyer("", 0, { kicker: v.kicker, headline: v.headline, points: v.points, cta: v.cta, note: v.note, caption: v.caption, layout: v.layout, style: v.style, enabled: false }); }
   });
   async function loadCreateHistory() {

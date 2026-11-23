@@ -253,8 +253,11 @@ def expire_stale_drafts() -> list[str]:
 
 
 def _insert_draft(story_id: int, headline: str, caption: str, image: Any, writer_name: str, flyer_id: str = "", meta: str = "",
-                  *, breaking: bool = False) -> int:  # fmt: skip
+                  *, breaking: bool = False, for_reel: bool = False) -> int:  # fmt: skip
+    """Save a waiting post and tell the editor. ``for_reel``: the caller makes the Reel and sends the one alert itself."""
     post_id = _save_draft(story_id, headline, caption, image, writer_name, flyer_id, meta)
+    if for_reel:
+        return post_id
     media, kind = Path(str(image)), "flyer" if flyer_id else "breaking" if breaking else "news"
     if reel_wanted():
         out = make_reel(post_id)
@@ -446,10 +449,10 @@ def _render_news(story_id: int, story: dict[str, Any], draft: writer.Draft, layo
     return card.render(story_id=story_id, category=story["category"], headline=draft.headline, points=draft.points, source=story["source"])
 
 
-def draft_flyer(flyer: flyers.Flyer | None = None, *, tags: str | None = None) -> dict[str, Any]:
+def draft_flyer(flyer: flyers.Flyer | None = None, *, tags: str | None = None, for_reel: bool = False) -> dict[str, Any]:
     flyer = flyer or pick_flyer()
     caption = f"{flyer.caption}\n\n{flyers.hashtags() if tags is None else tags}"
-    post_id = _insert_draft(0, flyer.headline, caption, flyers.render(flyer), "flyer", flyer.id, json.dumps({"flyer": snapshot(flyer)}))
+    post_id = _insert_draft(0, flyer.headline, caption, flyers.render(flyer), "flyer", flyer.id, json.dumps({"flyer": snapshot(flyer)}), for_reel=for_reel)
     logger.info("pipeline.drafted flyer=%s post=%s", flyer.id, post_id)
     return {"posted": False, "pending": True, "post_id": post_id, "reason": "waiting for approval"}
 

@@ -1171,7 +1171,8 @@ def create_app() -> Flask:
     def api_create_send() -> Any:
         body = request.get_json(silent=True) or {}
         try:
-            return jsonify(creator.send(int(body.get("idea_id") or 0), body.get("variant") or {}, rotate=bool(body.get("rotate"))))
+            return jsonify(creator.send(int(body.get("idea_id") or 0), body.get("variant") or {}, rotate=bool(body.get("rotate")),
+                                        as_reel=body.get("as") == "reel", style=str(body.get("style") or ""), track=str(body.get("track") or "")))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 

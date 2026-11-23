@@ -14,12 +14,13 @@ import logging
 import re
 import socket
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urljoin, urlparse
 
 import requests
 
-from technews import brands, db, flyers, pipeline
+from technews import brands, db, flyers, notify, pipeline
 from technews.agents import designer, editor, llm, team
 from technews.config import settings
 
@@ -213,14 +214,23 @@ def generate(idea: str, url: str = "", goal: str = "promote", tone: str = "profe
         return {"idea_id": idea_id, "variants": out, "ai": by == "ai", "page": {"title": page.get("title", ""), "url": page.get("url", "")} if page else None}
 
 
-def send(idea_id: int, variant: dict[str, Any], *, rotate: bool = False) -> dict[str, Any]:
-    """Save the chosen variant as a flyer (in the rotation only if asked) and hold a post for approval. Raises ValueError."""
+def send(idea_id: int, variant: dict[str, Any], *, rotate: bool = False, as_reel: bool = False, style: str = "", track: str = "") -> dict[str, Any]:
+    """Save the chosen variant as a flyer (in the rotation only if asked) and hold a post for approval: a still flyer,
+    or with ``as_reel`` a Reel made from it at once (the weekly Reel limit does not apply to one you ask for). If the
+    Reel cannot be made, the flyer still waits and ``reason`` says why. One alert either way. Raises ValueError."""
     clean = {**_clamp(variant), "layout": variant.get("layout") or "classic", "style": variant.get("style") or {}, "enabled": rotate}
     saved = flyers.save(clean)
-    result = pipeline.draft_flyer(flyers.get(saved.id))
-    db.execute("UPDATE ideas SET status = 'sent', flyer_id = ?, post_id = ? WHERE id = ? AND brand_id = ?", saved.id, result["post_id"], idea_id, settings.BRAND_ID)
-    team.feedback("idea_sent", result["post_id"], headline=saved.headline, layout=saved.layout)
-    return {"flyer_id": saved.id, "post_id": result["post_id"]}
+    result = pipeline.draft_flyer(flyers.get(saved.id), for_reel=as_reel)
+    post_id, reel, reason = result["post_id"], False, ""
+    if as_reel:
+        made = pipeline.make_reel(post_id, style=style, track=track)
+        reel, reason = bool(made.get("ok")), "" if made.get("ok") else str(made.get("reason") or "The Reel could not be made.")
+        still = Path(str(db.rows("SELECT image_path FROM posts WHERE id = ?", post_id)[0]["image_path"]).replace("\\", "/")).name
+        media = settings.CARDS_DIR / (made["video"] if reel else still)
+        notify.draft_ready(saved.headline, "animated flyer" if reel else "flyer", media, post_id=post_id)
+    db.execute("UPDATE ideas SET status = 'sent', flyer_id = ?, post_id = ? WHERE id = ? AND brand_id = ?", saved.id, post_id, idea_id, settings.BRAND_ID)
+    team.feedback("idea_sent", post_id, headline=saved.headline, layout=saved.layout)
+    return {"flyer_id": saved.id, "post_id": post_id, "reel": reel, "reason": reason}
 
 
 def history(limit: int = 8) -> list[dict[str, Any]]:
