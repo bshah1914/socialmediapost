@@ -325,7 +325,7 @@ def remind() -> list[str]:
                 sent_key = f"festival:{brand['id']}:{key}:{d.year}:reminded:{today.isoformat()}"
                 if found and found[0]["status"] == "pending" and not db.kv_get(sent_key):
                     when = "today" if d == today else "tomorrow"
-                    notify.send(f"CloudTrio: approve the {BY_KEY[key]['name']} flyer", f"{BY_KEY[key]['name']} is {when} and its flyer is still waiting for your approval. {notify.link()}")
+                    notify.send(notify.title(f"approve the {BY_KEY[key]['name']} flyer"), f"{BY_KEY[key]['name']} is {when} and its flyer is still waiting for your approval. {notify.link()}")
                     db.kv_set(sent_key, "1", ttl=2 * 86400)
                     told.append(f"{BY_KEY[key]['name']} ({brand['name']})")
     return told

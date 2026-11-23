@@ -84,18 +84,54 @@ def story_buttons(story_id: int) -> str:
     return json.dumps({"inline_keyboard": rows})
 
 
-def _telegram(title: str, text: str, image: Path | None, post_id: int = 0, markup: str = "") -> None:
+def title(text: str, brand_id: int | None = None) -> str:
+    """An alert's title, starting with the business it is about (the one running when ``brand_id`` is None)."""
+    from technews import brands
+
+    found = brands.get(settings.BRAND_ID if brand_id is None else brand_id)
+    return f"{found['name'] if found else settings.BRAND_NAME}: {text}"
+
+
+def chats_for(brand_id: int) -> list[str]:
+    """The Telegram chats an alert about this business goes to: the admin chat, and the business's own chat if it has one."""
+    from technews import brands
+
+    admin_chat = str(settings.TELEGRAM_CHAT_ID).strip()
+    chats = [admin_chat] if admin_chat else []
+    own = str((brands.get(brand_id) or {}).get("telegram_chat") or "").strip()
+    return chats + [own] if own and own not in chats else chats
+
+
+def brand_of(post_id: int) -> int:
+    found = db.rows("SELECT brand_id FROM posts WHERE id = ?", post_id) if post_id else []
+    return int(found[0]["brand_id"]) if found else settings.BRAND_ID
+
+
+def _telegram_all(title: str, text: str, image: Path | None, post_id: int, markup: str, brand_id: int) -> None:
+    """To every chat for this business; one chat failing does not stop the others (their failures are raised together)."""
+    errors = []
+    for chat in chats_for(brand_id):
+        try:
+            _telegram(title, text, image, post_id, markup, chat=chat)
+        except Exception as exc:  # noqa: BLE001 - the next chat still gets it
+            errors.append(f"chat {chat}: {exc}")
+    if errors:
+        raise RuntimeError("; ".join(errors))
+
+
+def _telegram(title: str, text: str, image: Path | None, post_id: int = 0, markup: str = "", *, chat: str = "") -> None:
     base = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}"
+    chat = chat or settings.TELEGRAM_CHAT_ID
     body = f"{title}\n\n{text}"
     extra = {"reply_markup": markup} if markup else {"reply_markup": buttons(post_id)} if post_id else {}
     if image and image.exists():
         video = image.suffix.lower() == ".mp4"
         with open(image, "rb") as fh:
             resp = requests.post(f"{base}/{'sendVideo' if video else 'sendPhoto'}", timeout=60 if video else TIMEOUT,
-                                 data={"chat_id": settings.TELEGRAM_CHAT_ID, "caption": body[:1000], **({"supports_streaming": "true"} if video else {}), **extra},
+                                 data={"chat_id": chat, "caption": body[:1000], **({"supports_streaming": "true"} if video else {}), **extra},
                                  files={"video" if video else "photo": fh})  # fmt: skip
     else:
-        resp = requests.post(f"{base}/sendMessage", data={"chat_id": settings.TELEGRAM_CHAT_ID, "text": body, **extra}, timeout=TIMEOUT)
+        resp = requests.post(f"{base}/sendMessage", data={"chat_id": chat, "text": body, **extra}, timeout=TIMEOUT)
     if not resp.ok:
         raise RuntimeError(f"Telegram said {resp.status_code}: {resp.text[:120]}")
 
@@ -134,14 +170,16 @@ def _app(title: str, text: str, image: Path | None) -> None:
 SENDERS: Final = {"app": _app, "email": _email, "telegram": _telegram, "webhook": _webhook, "whatsapp": _whatsapp}
 
 
-def send(title: str, text: str, image: Path | None = None, post_id: int = 0, *, markup: str = "") -> dict[str, str]:
+def send(title: str, text: str, image: Path | None = None, post_id: int = 0, *, markup: str = "", brand_id: int | None = None) -> dict[str, str]:
     """Send to every set-up channel; returns ``{channel: "sent" | error}``. With ``post_id`` Telegram gets Approve and Reject
-    buttons; ``markup`` gives it other buttons instead."""
+    buttons; ``markup`` gives it other buttons instead. Telegram also reaches the business's own chat: the business of
+    ``brand_id``, else of ``post_id``, else the one running."""
     out: dict[str, str] = {}
+    business = brand_id if brand_id is not None else brand_of(post_id)
     for name in channels():
         try:
             if name == "telegram":
-                _telegram(title, text, image, post_id, markup)
+                _telegram_all(title, text, image, post_id, markup, business)
             else:
                 SENDERS[name](title, text, image)
             out[name] = "sent"
@@ -168,22 +206,27 @@ def draft_ready(headline: str, kind: str, image: Path | None, *, wait: bool = Fa
     if caption:
         text += f"Caption:\n{caption[:560]}{'...' if len(caption) > 560 else ''}\n\n"
     text += f"Review and approve: {where}" if where else "Open the dashboard, Approvals, to review it."
-    title = "CloudTrio: BREAKING news is waiting for your approval" if kind == "breaking" else "CloudTrio: a post is waiting for your approval"
-    job = threading.Thread(target=send, args=(title, text, image, post_id), daemon=True)
+    business = brand_of(post_id) if post_id else settings.BRAND_ID  # decided here: the thread below does not run as the business
+    heading = title("BREAKING news is waiting for your approval" if kind == "breaking" else "a post is waiting for your approval", business)
+    job = threading.Thread(target=send, args=(heading, text, image, post_id), kwargs={"brand_id": business}, daemon=True)
     job.start()
     if wait:
         job.join()
     return job
 
 
-def reel_queued(headline: str, image: Path | None, post_id: int = 0) -> None:
+def reel_queued(headline: str, image: Path | None, post_id: int = 0) -> threading.Thread | None:
     """Tell the editor a Reel is ready to approve (fires in the background)."""
     if not channels():
-        return
+        return None
     where = link()
     text = (f"Reel ready for approval: {headline}\n\n"
             + (f"Review at: {where}" if where else "Open the dashboard, Reels, to review it."))
-    threading.Thread(target=send, args=("CloudTrio: a Reel is waiting for approval", text, image, post_id), daemon=True).start()
+    business = brand_of(post_id) if post_id else settings.BRAND_ID
+    job = threading.Thread(target=send, args=(title("a Reel is waiting for approval", business), text, image, post_id),
+                           kwargs={"brand_id": business}, daemon=True)  # fmt: skip
+    job.start()
+    return job
 
 
 def last_error() -> str:

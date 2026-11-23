@@ -246,7 +246,7 @@ def expire_stale_drafts() -> list[str]:
             gone.append(p["headline"])
     if gone:
         logger.info("pipeline.drafts_expired count=%d", len(gone))
-        notify.send("CloudTrio: old news drafts withdrawn",
+        notify.send(notify.title("old news drafts withdrawn"),
                     f"{len(gone)} news draft(s) waited over {hours} hours for approval and were withdrawn, so newer stories can come "
                     "through:\n- " + "\n- ".join(gone[:8]))  # fmt: skip
     return gone
@@ -912,7 +912,7 @@ def publish_due() -> list[dict[str, Any]]:
                 db.execute("UPDATE posts SET status = 'scheduled' WHERE id = ?", post_id)
             else:
                 db.execute("UPDATE posts SET error = ? WHERE id = ?", reason[:300], post_id)
-                notify.send("CloudTrio: a scheduled post did not go out", f"Post {post_id}: {reason}")
+                notify.send(notify.title("a scheduled post did not go out", notify.brand_of(post_id)), f"Post {post_id}: {reason}", brand_id=notify.brand_of(post_id))
             logger.warning("pipeline.scheduled_failed post=%s reason=%s", post_id, reason)
         out.append({"post_id": post_id, **result})
     return out

@@ -106,7 +106,7 @@ def collect(limit: int = MAX_POSTS) -> int:
                        post["id"], *(numbers[k] for k in NUMBERS), db.now())  # fmt: skip
             if before and numbers["comments"] > int(before[0]["comments"]):
                 new = numbers["comments"] - int(before[0]["comments"])
-                notify.send(f"CloudTrio: {new} new comment{'s' if new > 1 else ''} on Instagram",
+                notify.send(notify.title(f"{new} new comment{'s' if new > 1 else ''} on Instagram"),
                             f"{post['headline']}\n\nAnswer within the hour to keep the post moving.\n{post['permalink']}")  # fmt: skip
             done += 1
         info["summary"] = f"read the numbers of {done} post(s)"
@@ -204,4 +204,4 @@ def weekly_text() -> str:
 def weekly_report() -> dict[str, str]:
     if settings.IG_DELIVERY != "instagram" or not notify.channels():
         return {}
-    return notify.send("CloudTrio: your Instagram week", weekly_text() + (f"\n\n{settings.PUBLIC_URL.rstrip('/')}/#analytics" if settings.PUBLIC_URL else ""))
+    return notify.send(notify.title("your Instagram week"), weekly_text() + (f"\n\n{settings.PUBLIC_URL.rstrip('/')}/#analytics" if settings.PUBLIC_URL else ""))

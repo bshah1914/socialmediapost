@@ -60,14 +60,27 @@ def _answer(cb: dict[str, Any], text: str, *, alert: bool = False) -> None:
         logger.warning("telegram.answer_failed error=%s", exc)
 
 
+def _allowed(chat: str, action: str, post_id: int) -> bool:
+    """The admin chat decides every business's posts; a business's own chat only that business's posts
+    (and never the "possibly missed" news taps, which are the admin's)."""
+    if chat == str(settings.TELEGRAM_CHAT_ID).strip():
+        return True
+    if action == "md":
+        return False
+    found = db.rows("SELECT b.telegram_chat FROM posts p JOIN brands b ON b.id = p.brand_id WHERE p.id = ?", post_id)
+    return bool(found) and bool(str(found[0]["telegram_chat"] or "").strip()) and str(found[0]["telegram_chat"]).strip() == chat
+
+
 def handle(cb: dict[str, Any]) -> None:
     msg = cb.get("message") or {}
-    if str((msg.get("chat") or {}).get("id", "")) != str(settings.TELEGRAM_CHAT_ID).strip():
+    chat = str((msg.get("chat") or {}).get("id", ""))
+    action, _, raw = str(cb.get("data") or "").partition(":")
+    known = raw.isdigit() and action in ("ap", "rj", "ok", "no", "md")
+    if not _allowed(chat, action, int(raw) if known else 0):
         logger.warning("telegram.tap_from_other_chat")
         _answer(cb, "This chat is not allowed to approve posts.", alert=True)
         return
-    action, _, raw = str(cb.get("data") or "").partition(":")
-    if not raw.isdigit() or action not in ("ap", "rj", "ok", "no", "md"):
+    if not known:
         _answer(cb, "That button is not recognised.")
         return
     post_id = int(raw)
