@@ -1131,7 +1131,7 @@ def test_each_brand_has_its_own_settings_flyers_and_posts(monkeypatch):
     monkeypatch.setattr(settings, "IG_HANDLE", "cloudtrio.in")
     client = _client()
     out = client.post("/api/brands", json={"name": "Acme", "handle": "@acme", "ig_username": "acme_ig", "ig_password": "pw-1",
-                                           "hashtags": "#acme", "categories": "ai", "posts_per_day": 2}).get_json()  # fmt: skip
+                                           "hashtags": "#acme", "categories": "ai", "posts_per_day": 2, "kinds": "news,flyers"}).get_json()  # fmt: skip
     acme = out["id"]
     assert acme > 1 and all(b["ig_password"] == "" for b in out["brands"]) and any(b["ig_password_set"] for b in out["brands"])
     assert client.post("/api/brands", json={"name": ""}).status_code == 400
