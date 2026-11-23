@@ -19,7 +19,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
-from technews import db, flyers, pipeline
+from technews import brands, db, flyers, pipeline
 from technews.agents import designer, editor, llm, team
 from technews.config import settings
 
@@ -109,6 +109,9 @@ def fetch_page(url: str) -> dict[str, str]:
 
 def _business() -> str:
     offers = "; ".join(f"{f.kicker.title()}: {f.headline}" for f in flyers.listing()[:7])
+    if settings.BRAND_ABOUT:
+        return (f"{settings.BRAND_NAME}. What it does: {settings.BRAND_ABOUT.rstrip('.')}. Website {settings.BRAND_SITE}, contact {settings.BRAND_EMAIL}. "
+                f"What the business offers today: {offers or 'not listed'}.")
     return f"{settings.BRAND_NAME}. Website {settings.BRAND_SITE}, contact {settings.BRAND_EMAIL}. What the business offers today: {offers or 'not listed'}."
 
 
@@ -168,6 +171,8 @@ def generate(idea: str, url: str = "", goal: str = "promote", tone: str = "profe
         raise ValueError("Type an idea or paste a link first.")
     if not team.enabled("creator"):
         raise ValueError("The Idea creator is switched off (Agents).")
+    if not brands.has("ideas"):
+        raise ValueError("Ideas are switched off for this business.")
     goal, tone = (goal if goal in GOALS else "promote"), (tone if tone in TONES else "professional")
     with team.run("creator") as info:
         page: dict[str, str] = {}

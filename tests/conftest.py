@@ -63,3 +63,14 @@ def make_brand(name, **fields):
     brands.seed()  # business #1 exists first, as it does when the app starts
 
     return brands.save(None, {"name": name, **fields})
+
+
+@pytest.fixture
+def approved_story():
+    """One approved, fresh tech story waiting to be posted; returns its id."""
+    return db.execute("INSERT INTO stories (key, title, url, source, published_at, found_at, category, status, review_score) "
+                      "VALUES ('k-approved', 'AWS launches a new region in Spain', 'https://x.test/approved', 'AWS News Blog', ?, ?, 'cloud', 'approved', 9)",
+                      db.now(), db.now())  # fmt: skip
+
+
+SOURDOUGH = {"kicker": "NEW", "headline": "Sourdough every Sunday", "points": ["Baked at 6am"], "cta": "Visit us", "caption": "Fresh bread", "enabled": True}

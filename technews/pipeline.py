@@ -746,14 +746,20 @@ def _post_story(story_id: int, *, breaking: bool = False) -> dict[str, Any]:
 
 def post_next() -> dict[str, Any]:
     expire_stale_drafts()
+    news_on = brands.has("news")
+    flyers_on = brands.has("flyers") and settings.FLYERS_ENABLED
+    if not news_on and not flyers_on:  # a business that only posts what it makes itself (ideas, videos)
+        return {"posted": False, "reason": "this business makes no automatic posts"}
     # Breaking news does not wait for the gap between posts or for the queue of drafts.
-    if pacing(breaking=True)[0] and (hot := _postable(breaking=True)):
+    if news_on and pacing(breaking=True)[0] and (hot := _postable(breaking=True)):
         logger.info("pipeline.breaking story=%s", hot["id"])
         return {**_post_story(hot["id"], breaking=True), "breaking": True}
     ok, why = pacing()
     if not ok:
         return {"posted": False, "reason": why}
-    flyer_turn = next_is_flyer()
+    if not news_on and not flyers.listing(enabled_only=True):
+        return {"posted": False, "reason": "no flyers in the rotation"}
+    flyer_turn = next_is_flyer() if news_on else True  # a business without news posts a flyer every turn
     # The queue is per kind: a flyer waiting for approval never holds up the news, nor news a flyer.
     if needs_approval(flyer=flyer_turn) and (waiting := pending_count(flyer=flyer_turn)) >= settings.APPROVAL_QUEUE_MAX:
         return {"posted": False, "reason": f"{waiting} {'flyers' if flyer_turn else 'news posts'} waiting for your approval"}

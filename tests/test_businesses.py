@@ -69,3 +69,52 @@ def test_profile_cannot_set_key():
 def test_dry_run_business():
     bid = make_brand("Trial", delivery="dry_run")
     assert brands.overrides(brands.get(bid))["IG_DELIVERY"] == "dry_run"
+
+
+# --------------------------------------------------------------------------- what each business makes, and its voice
+
+from conftest import SOURDOUGH  # noqa: E402
+from technews import db, flyers, pipeline  # noqa: E402
+from technews.agents import creator  # noqa: E402
+
+
+def test_flyer_only_business_never_posts_news(approved_story):
+    bid = make_brand("Bakery", kinds="flyers")
+    with brands.use(bid):
+        flyers.save(SOURDOUGH)
+        out = pipeline.post_next()
+    assert out.get("flyer") or out.get("pending"), out
+    assert db.story(approved_story)["status"] == "approved"
+
+
+def test_news_business_still_posts_news(approved_story):
+    out = pipeline.post_next()  # CloudTrio, as today
+    assert out.get("posted") and db.story(approved_story)["status"] == "posted"
+
+
+def test_no_automatic_kinds_gives_reason(approved_story):
+    bid = make_brand("Studio", kinds="videos")
+    with brands.use(bid):
+        assert pipeline.post_next() == {"posted": False, "reason": "this business makes no automatic posts"}
+
+
+def test_flyers_on_but_none_saved():
+    bid = make_brand("Florist", kinds="flyers")
+    with brands.use(bid):
+        assert pipeline.post_next()["reason"] == "no flyers in the rotation"
+
+
+def test_ideas_off_refuses():
+    bid = make_brand("Clinic", kinds="flyers")
+    with brands.use(bid), pytest.raises(ValueError, match="Ideas are switched off"):
+        creator.generate("free check-up")
+
+
+def test_business_voice_in_brief():
+    bid = make_brand("Bakery", about="Family bakery in Pune since 1998")
+    with brands.use(bid):
+        assert creator._business().startswith("Bakery. What it does: Family bakery in Pune since 1998.")
+
+
+def test_cloudtrio_brief_unchanged():
+    assert creator._business().startswith(f"{settings.BRAND_NAME}. Website {settings.BRAND_SITE}")
