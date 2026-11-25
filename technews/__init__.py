@@ -137,8 +137,8 @@ def create_app() -> Flask:
                 return jsonify({"message": "Your business is switched off. Ask an admin.", "error": "Your business is switched off. Ask an admin."}), 403
         else:
             brand = brands.get(int(session.get("brand") or brands.DEFAULT_ID))
-            if brand is None or not brand["enabled"]:
-                brand = brands.get(brands.DEFAULT_ID)
+            if brand is None or not brand["enabled"]:  # the first business that is on; the first one if all are off
+                brand = next(iter(brands.active()), None) or brands.get(brands.DEFAULT_ID)
         g.brand = brand
         g.brand_token = config.set_override(brands.overrides(brand)) if brand else None
         args = request.view_args or {}

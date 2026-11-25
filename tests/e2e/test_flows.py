@@ -209,3 +209,18 @@ def test_owner_edits_their_own_business(sign_in, tmp_path):
     owner.locator("#my-logo-img:not([hidden])").wait_for()
     saved = next(b for b in _api(admin, "GET", "/api/brands")[1]["brands"] if b["id"] == bid)
     assert saved["about"].startswith("A florist in Nashik: wedding stages") and saved["logo"]
+
+
+def test_admin_switches_cloudtrio_off_and_on(sign_in):
+    page = sign_in()
+    page.on("dialog", lambda d: d.accept())
+    page.goto("/#businesses")
+    card = page.locator('.brand-card[data-bid="1"]')
+    card.locator("summary").click()
+    assert card.get_by_role("button", name="Delete…").count() == 0  # CloudTrio is never deleted
+    card.get_by_role("button", name="Switch off").click()
+    page.locator("#bmsg-1").get_by_text("Switched off.").wait_for()
+    assert not next(b for b in _api(page, "GET", "/api/brands")[1]["brands"] if b["id"] == 1)["enabled"]
+    page.locator('.brand-card[data-bid="1"]').get_by_role("button", name="Switch on").click()
+    page.locator("#bmsg-1").get_by_text("Switched on.").wait_for()
+    assert next(b for b in _api(page, "GET", "/api/brands")[1]["brands"] if b["id"] == 1)["enabled"]

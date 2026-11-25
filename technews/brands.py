@@ -233,9 +233,7 @@ def save(brand_id: int | None, data: dict[str, Any]) -> int:
         raise ValueError("No such brand")
     if password:  # a blank password keeps the saved one
         values["ig_password"] = secretbox.seal(password)
-    if brand_id == DEFAULT_ID:
-        values["enabled"] = 1  # the first brand cannot be switched off
-    turning_on = values.get("enabled") == 1 and not before["enabled"] and brand_id != DEFAULT_ID
+    turning_on = values.get("enabled") == 1 and not before["enabled"]
     if turning_on:  # switched on below, only once it passes the checks
         del values["enabled"]
     sets = ", ".join(f"{k} = ?" for k in values)
@@ -262,10 +260,12 @@ def readiness(brand_id: int) -> list[dict[str, Any]]:
     if brand is None:
         raise ValueError("No such brand")
     first = brand_id == DEFAULT_ID  # CloudTrio runs on the general settings and the built-in logo
-    instagram = bool(session_user(brand_id)) or brand.get("delivery") == "dry_run" or (first and settings.IG_SESSION_PATH.exists())
+    with use(brand):  # the first business's own trial run is the general setting
+        trial = settings.IG_DELIVERY == "dry_run"
+    instagram = bool(session_user(brand_id)) or brand.get("delivery") == "dry_run" or (first and (trial or settings.IG_SESSION_PATH.exists()))
     key = bool(settings.NVIDIA_API_KEY) if first else bool(brand.get("nvidia_key"))
     return [
-        {"key": "profile", "label": "What the business does (a sentence or two)", "ok": bool(brand["name"]) and len((brand.get("about") or "").strip()) >= 20, "required": True},
+        {"key": "profile", "label": "What the business does (a sentence or two)", "ok": first or (bool(brand["name"]) and len((brand.get("about") or "").strip()) >= 20), "required": True},
         {"key": "kinds", "label": "What it posts", "ok": bool(kinds(brand)), "required": True},
         {"key": "logo", "label": "Logo", "ok": first or logo_path(brand_id).exists(), "required": True},
         {"key": "instagram", "label": "Instagram connected (or trial run)", "ok": instagram, "required": True},
@@ -284,8 +284,6 @@ def switch_on(brand_id: int) -> None:
 
 def switch_off(brand_id: int) -> None:
     """Pause a business: nothing is posted for it and its people cannot work on it. Everything is kept."""
-    if brand_id == DEFAULT_ID:
-        raise ValueError("The first business cannot be switched off")
     if get(brand_id) is None:
         raise ValueError("No such brand")
     db.execute("UPDATE brands SET enabled = 0 WHERE id = ?", brand_id)

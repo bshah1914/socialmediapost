@@ -70,13 +70,58 @@ def test_save_switches_a_ready_business_on():
     assert brands.get(bid)["enabled"] == 1
 
 
-def test_switch_off_and_cloudtrio_stays_on():
+def test_switch_off_a_business():
     bid = _ready_brand()
     brands.switch_on(bid)
     admin = client_as("boss", "Admin@1234")
     assert admin.post(f"/api/brands/{bid}/disable").status_code == 200
     assert brands.get(bid)["enabled"] == 0
-    assert admin.post("/api/brands/1/disable").status_code == 400 and brands.get(1)["enabled"] == 1
+
+
+def test_cloudtrio_can_be_switched_off_and_back_on():
+    brands.seed()
+    admin = client_as("boss", "Admin@1234")
+    assert admin.post("/api/brands/1/disable").status_code == 200 and brands.get(1)["enabled"] == 0
+    brands.save(1, {"name": "CloudTrio"})  # saving its name keeps it off
+    assert brands.get(1)["enabled"] == 0
+    assert not any(b["id"] == 1 for b in brands.active())
+    out = admin.post("/api/brands/1/enable")  # it runs on the general settings: trial run counts as ready
+    assert out.status_code == 200, out.get_json()
+    assert brands.get(1)["enabled"] == 1
+
+
+def test_admin_with_cloudtrio_off_opens_the_next_business():
+    brands.seed()
+    bid = make_brand("Bakery")
+    brands.switch_off(1)
+    page = client_as("boss", "Admin@1234").get("/")
+    assert page.status_code == 200 and "<title>Bakery" in page.get_data(as_text=True)
+
+
+def test_admin_still_gets_in_with_every_business_off():
+    brands.seed()
+    brands.switch_off(1)
+    admin = client_as("boss", "Admin@1234")
+    page = admin.get("/")
+    assert page.status_code == 200 and 'id="businesses"' in page.get_data(as_text=True)
+
+
+def test_nothing_runs_for_cloudtrio_while_it_is_off(monkeypatch):
+    from technews import pipeline
+
+    brands.seed()
+    brands.switch_off(1)
+    called = []
+    monkeypatch.setattr(pipeline, "scan", lambda: called.append("scan") or {})
+    monkeypatch.setattr(pipeline, "review", lambda: called.append("review") or {})
+    monkeypatch.setattr(pipeline, "post_next", lambda: called.append("post") or {})
+    db.kv_release(pipeline.CYCLE_LEASE_KEY)
+    out = pipeline.run_cycle()
+    assert called == [] and out.get("brands") == {}, out  # no business that is on posts news: no scanning, no AI review
+    bid = make_brand("Bakery")  # on, but posts no news: still no scanning
+    db.kv_release(pipeline.CYCLE_LEASE_KEY)
+    out = pipeline.run_cycle()
+    assert called == ["post"] and list(out["brands"]) == ["Bakery"], out
 
 
 def test_disconnect_instagram_forgets_the_saved_login():

@@ -2617,10 +2617,13 @@
   function brandCard(b) {
     const id = b.id, kinds = (b.kinds || "").split(",");
     const col = (() => { try { return JSON.parse(b.colors || "{}"); } catch { return {}; } })();
-    if (id === 1) return `<details class="brand-card" data-bid="1" data-name="${esc(b.name)}"><summary><b>${esc(b.name)}</b> · first business · always on</summary>
+    const onOff = `<div class="bc-group"><h3>On or off</h3><ul class="list" data-bchecks aria-label="Readiness"></ul>
+        <p class="muted">${b.enabled ? "It is on: posts are made and its people can sign in. Switching it off pauses it and keeps everything." : "It is off: nothing is posted for it, no news is looked for on its behalf, and its people cannot work on it. Everything is kept."}</p>
+        <div class="row">${b.enabled ? '<button class="btn ghost" type="button" data-bact="off">Switch off</button>' : '<button class="btn" type="button" data-bact="on">Switch on</button>'}</div></div>`;
+    if (id === 1) return `<details class="brand-card" data-bid="1" data-name="${esc(b.name)}"><summary><b>${esc(b.name)}</b> · first business · ${b.enabled ? "on" : "off"}</summary>
       ${bInput(1, "name", "Name", b.name, 'maxlength="60"')}
-      <p class="muted">CloudTrio uses the general settings (Instagram, AI key, hashtags, contact) under Settings. It cannot be switched off or deleted.</p>
-      <div class="row"><button class="btn" type="button" data-bact="save">Save</button></div><div class="msg" id="bmsg-1" role="status" aria-live="polite"></div></details>`;
+      <p class="muted">CloudTrio uses the general settings (Instagram, AI key, hashtags, contact) under Settings. It can be switched off, but not deleted.</p>
+      <div class="row"><button class="btn" type="button" data-bact="save">Save</button></div>${onOff}<div class="msg" id="bmsg-1" role="status" aria-live="polite"></div></details>`;
     return `<details class="brand-card" data-bid="${id}" data-name="${esc(b.name)}"><summary><b>${esc(b.name)}</b> · ${b.enabled ? "on" : "off"} · ${b.delivery === "dry_run" ? "trial run" : "live"} · ${b.connected ? "@" + esc(b.connected) : "Instagram not connected"}</summary>
       <div class="bc-group"><h3>Profile</h3>
         ${bInput(id, "name", "Name", b.name, 'maxlength="60"')}
@@ -2646,9 +2649,7 @@
         ${bInput(id, "telegram_chat", "Its own Telegram chat id (optional)", b.telegram_chat, 'inputmode="numeric"')}
         <div class="row"><button class="btn ghost" type="button" data-bact="testchat">Send a test message</button></div></div>
       <div class="row" style="margin-top:14px"><button class="btn" type="button" data-bact="save">Save changes</button></div>
-      <div class="bc-group"><h3>On or off</h3><ul class="list" data-bchecks aria-label="Readiness"></ul>
-        <p class="muted">${b.enabled ? "It is on: posts are made and its people can sign in. Switching it off pauses it and keeps everything." : "It is off: nothing is posted and its people cannot work on it. Everything is kept."}</p>
-        <div class="row">${b.enabled ? '<button class="btn ghost" type="button" data-bact="off">Switch off</button>' : '<button class="btn" type="button" data-bact="on">Switch on</button>'}</div></div>
+      ${onOff}
       <div class="bc-danger"><h3>Delete this business</h3>
         <p class="muted">Deletes it for good: its posts, flyers, ideas, videos, its people's sign-ins, its saved Instagram login, logo and files. Posts already on Instagram stay there. A backup of the records is taken first.${b.enabled ? " Switch it off first." : ""}</p>
         <div data-bdelpane hidden><ul class="list" data-bfoot aria-label="What will be deleted"></ul><label for="bdel-${id}">Type <b>${esc(b.name)}</b> to confirm</label><input id="bdel-${id}" data-bconfirm autocomplete="off">

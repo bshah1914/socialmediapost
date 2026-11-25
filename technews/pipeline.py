@@ -882,10 +882,13 @@ def run_cycle(*, post: bool = True) -> dict[str, Any]:
         summary: dict[str, Any] = {"started_at": db.now()}
         db.kv_set(LAST_ERROR_KEY, "")  # an old error is not current; anything this cycle hits is saved again
         try:
-            summary["scan"] = scan()
-            summary["review"] = review()
+            brands.seed()
+            if any(brands.has("news", b) for b in brands.active()):  # news is only found and checked while a business that is on posts it
+                summary["scan"] = scan()
+                summary["review"] = review()
+            else:
+                summary["scan"] = summary["review"] = {"skipped": "no business that is on posts news"}
             if post:
-                brands.seed()
                 results = {}
                 for brand in brands.active():
                     with brands.use(brand):
